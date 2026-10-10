@@ -1,0 +1,115 @@
+AUDITED_TREE=9c0c8399c6e742b34b5cfcace87dc8535b9e3329
+
+**1. Is any site missing from the census? Yes.**
+
+I checked all 16 active mechanisms. These omissions are largely unchanged from round 9; listing a function under another mechanism does not discharge its obligation here.
+
+| Mechanism | Assessment |
+|---|---|
+| fee-conservation | No additional missing site found. |
+| opening-caps | No additional missing enforcement site found. |
+| principal-locking | No additional missing liquidity-operation site found. |
+| vesting-entitlement | Sites are listed; witness relevance remains the known issue. |
+| oracle-write | Ordinary swaps, self-buyback and same-second replacement are listed. |
+| realised-spend | Missing `_release` and payout settlement. [Payout]( src/TorchHook.sol:706) |
+| epoch-attribution | Missing `currentEpoch`, which selects the earning day. [Clock](src/TorchEpochRewards.sol:44) |
+| route-authority | No additional missing authorization boundary found. |
+| reentrancy | Missing direct claims, `_release`, buyback, LP collection, converter `_hop` and vesting `claim`; each requires its ordering or enclosing-lock argument. [Claims](src/TorchHook.sol:610), [vesting](src/TorchVesting.sol:77) |
+| execution-value | Missing converter execution/history helpers, buyback’s validation call and oracle interpolation/search helpers. [Execution](src/TorchConverter.sol:231), [interpolation](src/TorchOracle.sol:138) |
+| asset-backing | Missing direct-claim debits, converter receipt/callback/delivery, buyback/LP settlement and factory vesting funding. [Receipt](src/TorchConverter.sol:157), [funding](src/TorchFactory.sol:149) |
+| spending-rate | Missing `_allowanceShape`, pending/allowance readers, LP collection and the callback producing realised spend. [Shape](src/TorchHook.sol:834) |
+| launch-identity | Missing `predictCoin`, `_buildKey` and `_onPoolInitialized`. [Prediction](src/TorchFactory.sol:182), [initialization](src/TorchHook.sol:254) |
+| fixed-supply | No additional missing implementation site found. |
+| pool-isolation | Missing banking, purchase-ledger writes, payouts and oracle/epoch storage operations. Shared-quote epoch aggregation needs an explicit qualification. [Banking](src/TorchHook.sol:927), [aggregation](src/TorchEpochRewards.sol:53) |
+| swap-admission | Missing specified-fee arithmetic, checked narrowing and connected oracle/epoch writes. [Arithmetic](src/TorchHook.sol:279), [narrowing](src/TorchMath.sol:17) |
+
+**2. Is there a guarded behaviour with no `### mechanism:` section? Yes.**
+
+- **Callback/writer authentication:** manager, vault, active conversion pool, oracle writer and epoch recorder authorization. [Manager guard](src/TorchCLHookBase.sol:55), [conversion callback](src/TorchConverter.sol:324).
+- **Venue compatibility:** callback encoding, signed deltas, pool-key hashing and parameter packing. [Delta decoding](src/venue/BalanceDelta.sol:14), [packing](src/TorchParameters.sol:23).
+- **Dead-address disposition:** zero-creator refusal, burn-creator redirection and seed/LP disposal implement I14 without a dedicated section. [Refusal](src/TorchFactory.sol:112), [redirection](src/TorchHook.sol:945).
+- **Claim liveness across settlement limits:** a cumulative entitlement must remain withdrawable even when it exceeds one venue operation’s numeric range. This obligation exposes H1 below. [Full-balance claim](src/TorchHook.sol:610).
+
+For the six explicitly known-open MEDIUMs, **CLOSED BY WITHDRAWAL** below means withdrawn from this round’s reassessment by your instruction, **not technically repaired**.
+
+CLOSED BY WITHDRAWAL — r9a M1 / r9b M3: delivery-versus-nominal accounting remains known-open.
+
+CLOSED BY WITHDRAWAL — r9a M2 / r9b M4: pending-launch address substitution remains known-open.
+
+CLOSED BY WITHDRAWAL — r9a M3 / r9b M5: advertised versus executable TWAP band remains known-open.
+
+CLOSED BY WITHDRAWAL — r9a M5 / r9b M6: deployment and launch-sizing guidance remains known-open.
+
+CLOSED BY WITHDRAWAL — r9a M6 / r9b M8: quote-discovery guidance remains known-open.
+
+CLOSED BY WITHDRAWAL — r9a M7 / r9b M9: census source-coverage enforcement remains known-open.
+
+PATCHED — r9a M4 / r9b M7: the targeted wording improved, but claims cleanup remains incomplete; M1 below.
+
+PATCHED — r9a M8 / r9b M10: the 505-unit fixture now forces checkpointing and distinguishes scaled accrual. Other previously identified witness gaps remain unchanged. [Corrected loop](test/TorchBuyback.t.sol:725).
+
+**HIGH**
+
+**H1 — Full-balance payouts permanently strand claims exceeding the venue’s signed settlement limit.**
+
+`TorchHook` accepts cumulative creator/referrer entitlements as `uint256`, but every withdrawal requests the entire entitlement. Its payout calls `vault.burn`, whose amount must fit a positive `int128`: at most `2^127 − 1`. This is a Torch integration defect: the ledger can grow beyond the size its withdrawal path supports. [Creator claim](src/TorchHook.sol:610), [referrer claim](src/TorchHook.sol:621), [payout](src/TorchHook.sol:589), [venue restriction](lib/infinity-core/src/libraries/SafeCast.sol:54).
+
+A concrete source-derived construction:
+
+1. Launch against an ordinary, non-taxing **36-decimal ERC-20**, with coin as currency0, supply `10^33`, liquidity `999 × 10^30`, opening square-root price `2^96`, starting tick zero, and zero creator allocation, self-burn share and referral share. The seed consumes approximately 99.9% of supply and satisfies the factory’s remainder check. Such quote decimals are within the plan’s stated **at-least-six** assumption. [Creation](src/TorchFactory.sol:129), [remainder check](src/TorchFactory.sol:145), [assumption](docs/plan.md:374).
+2. After the two-block cap window, execute **215 exact-input buys**, each with `zeroForOne=false`, `amountSpecified=−10^38`, and price limit `2^150`, without claiming between them. Each individual input and output fits the venue’s signed range; the seeded range has ample remaining capacity.
+3. Each trade banks fee `floor(10^38 / 101)`. With the selected shares, the creator receives that fee minus its floored 20% platform share. [Fee calculation](src/TorchHook.sol:279), [split](src/TorchHook.sol:927).
+
+| Quantity | Raw quote units |
+|---|---:|
+| Maximum settlement amount | 170141183460469231731687303715884105727 |
+| Creator pending after 214 buys | 169504950495049504950495049504950494880 |
+| Creator pending after 215 buys | **170297029702970297029702970297029702800** |
+
+The threshold is approximately **170.14 whole quote tokens** at 36 decimals.
+
+Every subsequent creator claim reverts. `claimAsBnb` cannot rescue it: `_claimTo` attempts the same full payout before conversion. Reversion restores the oversized entitlement, future accrual only increases it, and no entry point permits a smaller withdrawal. The referrer path has the same failure. [Conversion claim settlement](src/TorchHook.sol:684), [release](src/TorchHook.sol:706).
+
+This requires neither transfer taxation nor a partial conversion fill. Permit bounded withdrawals while preserving the unpaid remainder. The construction was checked through source inspection and integer arithmetic, **not an EVM reproduction**.
+
+**MEDIUM**
+
+**M1 — The documents still exceed the implementation after the targeted corrections.**
+
+The corrected first-hour, thin-pool and keeper-tip paragraphs now describe their intended boundaries. However, the claims-clean assertion remains false:
+
+| Remaining claim | Concrete contradiction |
+|---|---|
+| Quote claiming “always works.” | Accrue a positive claim, then pause its quote token: payout reverts. The interface retains this unconditional statement despite documenting the exception elsewhere. [Claim](docs/interface.md:237), [existing counterexample](test/TorchIsolation.t.sol:133). |
+| I1: no swap can revert because of fee accounting. | A specified-quote trade stopped early by its price limit deliberately reverts. The README correction did not reach this invariant. [Claim](docs/plan.md:386), [refusal](src/TorchHook.sol:387). |
+| Quote decimals are read and stored at creation. | Creation performs no decimals read or snapshot. [Claim](docs/plan.md:355), [creation path](src/TorchFactory.sol:105). |
+| Vesting duration has an immutable economic band. | Allocation creation stores the supplied duration without such a band; zero immediately vests the allocation. [Claim](docs/plan.md:1033), [implementation](src/TorchVesting.sol:54). |
+| The hourly witness presses every second. | Its invocation uses 60-second steps. [Promise-table description](README.md:66), [invocation](test/TorchBuyback.t.sol:620). |
+| A refused conversion can be retried with smaller `amountIn`. | The surviving claimant entry point exposes no amount argument and claims the entire entitlement. Plain quote claiming remains the fallback, subject to H1. [Instruction](docs/plan.md:553), [entry point](src/TorchHook.sol:659). |
+
+These are claim discrepancies, not requests to restore withdrawn mechanisms.
+
+**LOW**
+
+No fresh finding. Unchanged round-9 findings are not re-counted here.
+
+The remaining acceptance/refusal review found:
+
+- **Factory, token and vesting:** creation is permissionless within the supply, creator, allocation, share and seed checks. Registration/seeding and allocation creation retain factory authority. Vesting retires only vested entitlement and pays its fixed recipient. No additional mint, principal-withdrawal or economic-setter path was found.
+- **Fees and caps:** all four branches consistently select quote. Specified-input buys use the `/101` correction; specified-output sells use `/99`; the other branches charge realised quote. Fractional fee rounding favours the trader, while split remainders go to the creator. Caps count positive coin receipts during the opening blocks and admit sales. The `tx.origin` key is disclosed correctly, but the “contract-per-swap” bypass explanation is wrong: different intermediaries retain the same origin. [Caps](src/TorchHook.sol:356), [explanation](docs/plan.md:277).
+- **Reentrancy and hostile quotes:** no additional reachable bookkeeping exploit was established. Claim debits precede payout and revert with it. Self-buyback settles quote through vault claims and transfers only the factory-minted coin. Freezing quote transfers therefore affects claims without adding that transfer dependency to self-buyback. [Settlement](src/TorchHook.sol:534).
+- **Withdrawal and split boundaries:** converter refusal remains atomic at every hop. Self-buyback accepts partial fills, debits realised spend and rolls back zero-output presses. H1 defeats the separate claim fallback; it does not reveal intermediate-token residue. No platform two-press transition survives in this checkout. [Per-hop refusal](src/TorchConverter.sol:262), [buyback debit](src/TorchHook.sol:766).
+- **Oracle, epoch and keeper accounting:** the shipped TWAP wrapper refuses insufficient history; authenticated epoch recording preserves per-day/per-quote sums. Tips are fractions of purchased output, with no caller gas guarantee. The wider execution band remains the declared known-open issue.
+
+**EXECUTION-NOTES**
+
+- Initial and final HEAD matched the pin. All **87 tracked review files** checked matched it; cited venue dependencies were checked separately. No files were changed.
+- Boundary checks and census checking/scanning passed, including all **94 parser self-tests**.
+- All **42 mutation anchors** exist uniquely; `KNOWN_UNKILLED` is empty.
+- The corrected fixture’s integer model produced pending **12,281**, allowance **201** with scaling and **0** without it.
+- H1’s fee/threshold arithmetic is exact. Its range-feasibility model has wide margins but omits empty-tick traversal rounding.
+- `forge test --offline` stopped before execution because the read-only workspace denied its cache write. Solidity, fork and mutation-suite results were not independently reproduced.
+
+I would **not sign off this tree for internal v1**: H1 makes an admitted, fully backed entitlement permanently unreachable. The remaining claims also prevent a claims-clean seal.
+
+VERDICT: HIGH=1 MEDIUM=1 LOW=0

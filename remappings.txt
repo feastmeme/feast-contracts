@@ -1,0 +1,6 @@
+forge-std/=lib/forge-std/src/
+ds-test/=lib/ds-test/src/
+@openzeppelin/=lib/openzeppelin-contracts/
+solmate/=lib/solmate/
+infinity-core/=lib/infinity-core/
+uniswap-v4-core/=lib/uniswap-v4-core/

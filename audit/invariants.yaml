@@ -1,0 +1,515 @@
+# The invariants list for the contract-audit dynamic layer, v1.6 (task 444, second leg).
+# P-numbers and statements are docs/audit-briefs/v16-unit.md, "Invariants to break"; witnesses were
+# resolved against the tree's own tests. v1's I1-I15 are carried by the whole v1 suite, which runs
+# unchanged here, and by the stateful harness rows below.
+schema: contract-audit/invariants/v1
+source: "docs/audit-briefs/v16-unit.md, Invariants to break"
+invariants:
+  - id: P1
+    statement: For every (week, quote, track), the total equals the sum of the accounts.
+    severity_if_broken: HIGH
+    witnesses:
+      - test/FeastFeeLedger.t.sol:FeastFeeLedgerTest.testFuzz_eachTotalIsExactlyTheSumOfItsAccounts
+      - test/FeastAccounting.t.sol:FeastAccountingTest.test_theLedgerIsActuallyConnected
+    harness:
+      - test/audit/invariants/FeastInvariants.t.sol:FeastInvariants.invariant_referrerLedger
+  - id: P3
+    statement: A fee is credited whole, once, to each role, in the week and quote it was paid in; a zero role and a burn-address creator are never accounts.
+    severity_if_broken: HIGH
+    witnesses:
+      - test/FeastAccounting.t.sol:FeastAccountingTest.test_feesAreRecordedAgainstTheWeekThatPaidThem
+      - test/FeastAttribution.t.sol:FeastAttributionTest.test_aBurnAddressCreatorEarnsNoCreatorTrack
+  - id: P4
+    statement: A referrer equal to tx.origin earns neither commission nor ledger credit, on any branch.
+    severity_if_broken: MEDIUM
+    witnesses:
+      - test/FeastAttribution.t.sol:FeastAttributionTest.test_eachBranchCreditsTheWholeFeeToPayerCreatorAndReferrer
+      - test/FeastAttribution.t.sol:FeastAttributionTest.testFuzz_aReferrerEqualToThePayerNeverCredits
+      - test/FeastAttribution.t.sol:FeastAttributionTest.test_aSelfReferralIsNoReferralOnAnyBranch
+      - test/FeastAttribution.t.sol:FeastAttributionTest.test_aSelfReferralLeavesTheSplitExactlyAsAnUnreferredTrade
+  - id: P5
+    statement: Before openAt, no address but the opener completes a swap in a gated pool; from openAt, everyone does.
+    severity_if_broken: HIGH
+    witnesses:
+      - test/FeastGate.t.sol:FeastGateTest.test_beforeOpenAtAStrangerCannotTradeOnAnyBranch
+      - test/FeastGate.t.sol:FeastGateTest.test_oneSecondBeforeOpenAtIsStillClosed
+      - test/FeastGate.t.sol:FeastGateTest.test_theOpenerTradesBeforeOpenAtOnEveryBranch
+      - test/FeastGate.t.sol:FeastGateTest.test_atOpenAtEveryoneTrades
+  - id: P6
+    statement: >-
+      In the opening blocks every wallet is capped at 0.5% of supply and nobody is exempt. Before the pool opens, the creator may have bought a disclosed amount of their own coin at creation, paid for in quote at the pool's own price, bounded by a constant (20% of supply) and shown on the coin page from block one.
+      **The window is CAP_BLOCKS blocks from the pool's first SERVED public swap** (v1.6.15), for
+      both gated and ungated pools, through one arming site - not from its creation block. A pool
+      that has not traded has not opened, so a freeze cannot spend a window that has not started,
+      and the creator's pre-buy does not arm it. The boundary that remains is stated in
+      `plans/audit/freeze-clock-sweep.md`. **v1.6.16: the window is a COUNT of the distinct
+      blocks the pool has SERVED a trade in**, not a height. A height passes whether or not
+      anybody may trade, and the v1.6.15 round showed the guardian spending one with its own
+      first trade plus a freeze in the same block - it does not have to predict a stranger's
+      trade, it makes the trade. A frozen block serves no trade, so it does not count, and
+      there is no quantity left for a freeze to spend. Several trades in one block count once;
+      counting stops at CAP_BLOCKS + 1, so an ordinary trade past the window pays one SLOAD and
+      no SSTORE. The creator's pre-buy counts as no block.
+    severity_if_broken: HIGH
+    witnesses:
+      - test/FeastCaps.t.sol:FeastCapsTest.test_thePurchasesOfOneWalletAccumulateAcrossTrades
+      - test/FeastPrebuy.t.sol:FeastPrebuyTest.test_theCreatorsOwnNextBuyIsStillCapped
+      - test/FeastPrebuy.t.sol:FeastPrebuyTest.test_noOneElseCanReachThePrebuyExemption
+      - test/FeastPrebuy.t.sol:FeastPrebuyTest.test_thePrebuyIsNotCountedAsAnOpeningPurchase
+      - test/FeastPrebuy.t.sol:FeastPrebuyTest.test_aPrebuyAboveTheMaximumIsRefusedByName
+      - test/FeastPrebuy.t.sol:FeastPrebuyTest.test_theDisclosureViewAgreesWithTheVestingAllocation
+      - test/FeastCaps.t.sol:FeastCapsTest.test_theWindowIsArmedByTheFirstSwapAndNotByTheClock
+      - test/audit/poc/FreezeClockFixesLeftThreeGaps.t.sol:FreezeClockFixesLeftThreeGapsPoC.test_aPrebuyDoesNotArmTheOpeningCap
+      - test/FeastCaps.t.sol:FeastCapsTest.test_theLastBlockOfTheWindowIsStillCapped
+      - test/FeastCaps.t.sol:FeastCapsTest.test_theCapIsGoneOnceTheOpeningBlocksHavePassed
+      - test/audit/poc/V1615RoundFindings.t.sol:V1615RoundFindingsPoC.test_theGuardianCannotSpendAPoolsCapWindowWithItsOwnFirstTrade
+      - test/audit/poc/V1616RoundFindings.t.sol:V1616RoundFindingsPoC.test_theGuardianCannotServeTheWindowAlone
+      - test/audit/poc/V1616RoundFindings.t.sol:V1616RoundFindingsPoC.test_aStrangerInTheWindowIsCapped
+      - test/FeastGuardian.t.sol:FeastGuardianTest.test_aFreezeStopsEveryPoolBecauseThereIsNoOtherKind
+      - test/audit/poc/V1617RoundFindings.t.sol:V1617RoundFindingsPoC.test_aFreezeIsRefusedInTheBlockAnUnfreezeCleared
+      - test/audit/poc/LapsedFreezeBracket.t.sol:LapsedFreezeBracketPoC.test_theGuardianCannotBracketABlockThroughALapsedFreeze
+      - test/audit/poc/V1617RoundFindings.t.sol:V1617RoundFindingsPoC.test_aStrangerCanReachAnOpeningBlockTheGuardianDidNotBracket
+  - id: P7
+    statement: The platform share leaves only to the sink genesis named, at most one settlement per call, debited by exactly what was paid; no other bucket moves.
+    severity_if_broken: HIGH
+    witnesses:
+      - test/FeastGenesis.t.sol:FeastGenesisTest.test_theExitPaysTheSinkGenesisNamed
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.test_theExitDeliversThePlatformShareHere
+      - test/FeastPlatformExit.t.sol:FeastPlatformExitTest.test_beforeGenesisNamesASinkTheExitRefuses
+      - test/FeastPlatformExit.t.sol:FeastPlatformExitTest.test_aSinkWithNoCodeYetIsRefusedAndTheBucketIsUntouched
+    harness:
+      - test/audit/invariants/FeastInvariants.t.sol:FeastInvariants.invariant_nothingStrandsAndPlatformIsUnspent
+  - id: P9
+    statement: The platform coin's supply is minted once and routed 60/25/14.2/0.8; nothing remains in the factory.
+    severity_if_broken: HIGH
+    witnesses:
+      - test/FeastGenesis.t.sol:FeastGenesisTest.test_itRunsOnceAndThenNothingIsPrivileged
+      - test/FeastAuthority.t.sol:FeastAuthorityTest.test_theSinksOpeningIsTheGenesisKeysAndIsSpentByUsingIt
+  - id: P10
+    statement: The internal fill never refuses a trade; it fills only exact-input sales at spot inside the bounds, and the coin taken is burned.
+    severity_if_broken: HIGH
+    witnesses:
+      - test/FeastBuyback.t.sol:FeastBuybackTest.test_theAllowanceRefillsContinuouslyAndIsCapped
+      - test/FeastConverterBounds.t.sol:FeastConverterBoundsTest.test_aMiddleHopThatPartFillsRefusesTheWholeRoute
+      - test/FeastConverterBounds.t.sol:FeastConverterBoundsTest.test_aTwoHopRouteThatFillsCompletelyIsStillAccepted
+      - test/FeastConverterBounds.t.sol:FeastConverterBoundsTest.test_aFirstHopThatPartFillsRefusesTheWholeRoute
+    harness:
+      - test/audit/invariants/FeastInvariants.t.sol:FeastInvariants.invariant_filledCoinBacked
+  - id: P11
+    statement: Every ungated swap emits exactly one Trade whose amounts equal the venue's delta for the trader.
+    severity_if_broken: MEDIUM
+    witnesses:
+      - test/FeastAttribution.t.sol:FeastAttributionTest.test_aSelfReferralLeavesTheSplitExactlyAsAnUnreferredTrade
+      - test/FeastCaps.t.sol:FeastCapsTest.test_thePurchasesOfOneWalletAccumulateAcrossTrades
+      - test/FeastEndToEnd.t.sol:FeastEndToEndForkTest.test_fork_createAndTradeAgainstARealStockToken
+      - test/FeastFactory.t.sol:FeastFactoryTest.test_theNewPoolTradesAndTakesItsFee
+  - id: P13
+    statement: >-
+      A week settles once, in order, after it closes, under the binding cap; the sum ever settled
+      never exceeds the budget. It never reverts on the SIZE of a cap it was going to discard
+      (v1.6.5, CA-5203dcf236), and where a price it needs is one the oracle will not vouch for it
+      refuses and waits rather than guessing - for the platform coin and for a listed quote alike,
+      each status read for what it means, and each refusal reaching only as far as the other's:
+      a quote carrying no fees that week is passed over, not held for (v1.6.5, CA-81659c1034).
+      Every division on the value-cap path floors.
+    severity_if_broken: HIGH
+    witnesses:
+      - test/FeastEmissions.t.sol:FeastEmissionsTest.test_aWeekSettlesOnlyAfterItClosesInOrderAndOnce
+      - test/audit/poc/EmissionsValueCapOverflow.t.sol:EmissionsValueCapOverflowPoC.test_aWeekWhoseCapIsTheTokenCapCanSettle
+      - test/FeastV165Bounds.t.sol:FeastV165BoundsTest.test_atTheExactWordBoundaryTheTokenCapIsTaken
+      - test/FeastV165Bounds.t.sol:FeastV165BoundsTest.test_oneUnitBelowTheWordBoundaryTheValueCapIsComputed
+      - test/FeastV165Bounds.t.sol:FeastV165BoundsTest.testFuzz_settleNeverRevertsOnTheSizeOfItsCap
+      - test/audit/poc/EmissionsMovedQuoteZeroed.t.sol:EmissionsMovedQuoteZeroedPoC.test_aMovedQuoteIsRefusedPastTheGraceAsTheMovedPlatformPriceIs
+      - test/FeastEmissions.t.sol:FeastEmissionsTest.test_aMovedQuoteIsRefusedInsideTheGraceAndPastIt
+      - test/FeastEmissions.t.sol:FeastEmissionsTest.test_aMovedQuoteSettlesOnceItsSpotIsBackInsideTheBound
+      - test/FeastEmissions.t.sol:FeastEmissionsTest.test_aMovedQuoteWithNoFeesThatWeekDoesNotHoldTheWeekUp
+      - test/FeastV165Bounds.t.sol:FeastV165BoundsTest.test_theValueCapsFloorsAreVisibleWhereTheyRound
+      - test/FeastEmissions.t.sol:FeastEmissionsTest.test_aPreLaunchWeekSettlesUnderTheTokenCapAlone
+      - test/FeastEmissions.t.sol:FeastEmissionsTest.test_theValueCapBindsOnceThePlatformCoinHasAPrice
+      - test/FeastClaimBound.t.sol:FeastClaimBoundTest.test_theTwoClaimComponentsShareOneSettlementBudget
+      - test/FeastEmissions.t.sol:FeastEmissionsTest.test_theTokenCapFallsLinearlyAndSumsToTheBudget
+  - id: P14
+    statement: >-
+      The claims of a week never exceed its pots; nothing is claimable before the pool opens;
+      unclaimed pots burn only after grace. A settled week is settled in its QUOTE LIST as well as
+      in its prices: settlement snapshots the list it priced, each distinct quote once, and the
+      owed/claim path reads only that snapshot and the prices stored beside it. Nothing on that
+      path asks the pricer anything after settlement - the contracts it still calls are the fee
+      ledger, the hook, and the platform coin that `claim` pays in, all three immutable and
+      replaceable by no lever - so nothing a pricer module says afterwards can revalue a week
+      already settled (v1.6.3, CA-7e9b1e15be).
+    severity_if_broken: HIGH
+    witnesses:
+      - test/FeastEmissions.t.sol:FeastEmissionsTest.test_aPricerThatRevertsAfterSettlementChangesNoEntitlement
+      - test/FeastEmissions.t.sol:FeastEmissionsTest.test_aDuplicateQuoteAtSettlementIsCountedOnce
+      - test/audit/poc/EmissionsPricerMutation.t.sol:EmissionsPricerMutationPoC.test_aSettledEntitlementDoesNotChangeAfterItsWeekIsSettled
+      - test/FeastEmissions.t.sol:FeastEmissionsTest.testFuzz_theClaimsOfAWeekNeverExceedItsPots
+      - test/FeastEmissions.t.sol:FeastEmissionsTest.test_anUnclaimedWeekBurnsAfterItsGrace
+      - test/FeastEmissions.t.sol:FeastEmissionsTest.test_aPreLaunchWeekExpiresTwelveWeeksAfterClaimsOpen
+      - test/FeastAccounting.t.sol:FeastAccountingTest.test_lpFeesNeverEnterAnEpochPot
+      - test/FeastBuyback.t.sol:FeastBuybackTest.test_aMovedSpotPriceStopsTheButton
+  - id: P15
+    statement: Only the timelock pulls a lever; each lever stays in its band and applies from the next week.
+    severity_if_broken: HIGH
+    witnesses:
+      - test/FeastEmissions.t.sol:FeastEmissionsTest.test_afterLaunchAnUnpriceablePlatformPriceWaitsForTheLever
+      - test/FeastEmissions.t.sol:FeastEmissionsTest.test_onlyTheTimelockPullsALever
+      - test/FeastEmissions.t.sol:FeastEmissionsTest.test_aLeverTakesEffectFromTheNextLedgerWeek
+      - test/FeastEmissions.t.sol:FeastEmissionsTest.test_theTimelockIsWiredAsRuled
+  - id: P16
+    statement: A partner's grant unlocks by the referred fees the ledger prices, capped at the grant, counted once per week.
+    severity_if_broken: MEDIUM
+    witnesses:
+      - test/FeastPackageTwo.t.sol:FeastGenesisGrantsTest.test_eightDistinctPartnersAndATargetAreRequired
+      - test/FeastPackageTwo.t.sol:FeastGenesisGrantsTest.test_aGrantUnlocksByTheFeesItsPartnersLinksBring
+      - test/FeastPackageTwo.t.sol:FeastGenesisGrantsTest.test_aRepeatedGrantClaimPaysOnlyWhatIsNew
+  - id: P17
+    statement: The launch window settles exactly once in its exclusive hour; every committer gets the same average price; a window that cannot settle refunds in full.
+    severity_if_broken: HIGH
+    witnesses:
+      - test/FeastCaps.t.sol:FeastCapsTest.test_theCapWindowAndSizeAreVisibleOnChain
+      - test/FeastGenesis.t.sol:FeastGenesisTest.test_nobodyTradesThePlatformPoolBeforeTheWindowOpensIt
+      - test/FeastOracle.t.sol:FeastOracleTest.test_aLongWindowIsShortenedToTheHistoryItActuallyHas
+      - test/FeastPackageTwo.t.sol:FeastLaunchWindowTest.test_commitsOpenAtTheStartAndCloseAtTheEnd
+  - id: P19
+    statement: >-
+      The sink sells any asset but the platform coin. A descent runs only over a lot that holds
+      something and prices the lot it was opened over: a lot holding at least SINK_REOPEN_MULTIPLE
+      times what it held when its descent began is priced from the start price again, by the view
+      and by a take alike (v1.6.2).
+      **A SALE RAISES THE CURVE AND DOES NOT RESTART IT** (v1.6.19): `anchor` is multiplied by
+      1 + amountOut/held and the clock is left where it was, so the descent is MEMORYLESS - a
+      take at any moment leaves the lot on the same curve and a take of nothing changes nothing.
+      Before this, re-anchoring reset the clock; the curve is exponential by halvings and LINEAR
+      inside each one, a chord lies ABOVE the exponential it spans, and a drip of one-unit takes
+      never reached the cheap end of one. Measured 2.03x the honest price after six hours of
+      takes every thirty minutes, and /burn gives anyone the button (HK19-claude MEDIUM, v1.6.16
+      round). After a sale the price does not fall below that sale's price
+      halved SINK_FLOOR_HALVINGS times - weighted by the share of the lot that sale took - and that
+      floor itself halves every SINK_FLOOR_HALF_LIFE since the sale, so neither a dust purchase nor
+      the passage of time pins a lot above the market (v1.6.2, H2 and round 4). THAT SENTENCE IS
+      EXACT ONLY IN REAL NUMBERS; what the code keeps is stated in the two clauses below, each with
+      the truncation it carries. Read them as the invariant, not as a retraction of this line. A take may RAISE
+      that floor and never lower it, and a take that does not raise it does not restart its clock
+      either. The floor a real sale set is held exactly on its own clock; a sale that DOES raise it
+      is exactly not-lower at the sale and within one raw price unit of the old curve afterwards,
+      the same truncation the slack below covers (v1.6.3 round 2, r2h). A later, lower
+      sale's own-clock floor is held to within the decay curve's chord gap - never worse than 8/9
+      of it LESS AN ABSOLUTE SLACK OF FOUR RAW PRICE UNITS, at half a half-life on each clock
+      (v1.6.3, CA-b229a31396, and round 1 r1v for the slack). The 8/9 is a statement about real
+      numbers; the floor is read by a shift and a truncated linear step, twice over, and at
+      exactly half a half-life on each clock the real inequality is tight, so the truncations
+      cross it at EVERY magnitude. Where four units matter the relative half says nothing and the
+      slack is the whole promise. Four units of Q128 price is NOT economically zero on a large
+      lot - a take pays amountOut x price / 2^128, so four units over N raw units is up to
+      4N / 2^128 platform coin, thousands of FEAST for the largest lots. It is the price of
+      reading a decaying floor with integer arithmetic, stated rather than dressed up (v1.6.3
+      round 3, r3v). Opening a new descent clears the
+      floor the last one earned, and nothing else does. No descent runs before the sink's opening: the
+      genesis key names the launch window once, the sink checks that window's role and coin and
+      reads its close, and that close is the opening - until it, the coin exists but nobody can
+      hold any (v1.6.2, rounds 5 and 6). The price
+      is never zero, and everything the sink is paid is burned.
+    severity_if_broken: HIGH
+    witnesses:
+      - test/audit/poc/DustTakeStallsTheDescent.t.sol:DustTakeStallsTheDescentPoC.test_aDripOfDustTakesDoesNotHoldTheDescentUp
+      - test/audit/poc/DustTakeStallsTheDescent.t.sol:DustTakeStallsTheDescentPoC.test_aRealTakeStillRaisesThePriceByTheShareItTook
+      - test/audit/poc/DustTakeStallsTheDescent.t.sol:DustTakeStallsTheDescentPoC.test_aTakeOnAHalfLifeEdgeKeepsTheCurveContinuous
+      - test/audit/poc/DustTakeStallsTheDescent.t.sol:DustTakeStallsTheDescentPoC.test_aWholeLotTakeDoublesThePriceAndThenLeavesNoDescent
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.test_aLotStartsHighAndHalvesEveryHour
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.test_anUnsoldLotNeverBecomesFree
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.test_aTakeBurnsItsPaymentAndReanchorsByTheShareTaken
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.test_platformCoinSentToTheSinkBurns
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.test_aLotCannotBeOpenedBeforeItHoldsAnything
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.test_aRefillIntoAnEmptyLotIsPricedFromTheTop
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.test_aLotThatHasDoubledIsPricedFromTheTopUntilItIsOpenedAgain
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.test_aDustDonationCannotRestartALiveDescent
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.test_aDrainedLotRefilledWithDustIsANewLotNotALiveDescent
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.test_afterASaleThePriceStopsAtItsFloor
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.test_aLotPinnedAtItsFloorUnsticksAsTheFloorDecays
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.test_aRaisingTakeResetsTheFloorsLevelAndItsClock
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.test_aTakeThatDoesNotRaiseTheFloorLeavesItAndItsClockExactlyWhereTheyWere
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.test_aCarriedFloorIsClearedByOpeningAndNotByASale
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.testFuzz_theChordGapIsNeverWorseThanEightNinthsLessItsSlack
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.test_theChordGapNeedsItsAbsoluteSlackAtEveryMagnitude
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.test_aRaisingTakeIsExactAtTheSaleAndWithinOneUnitAfterIt
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.testFuzz_aRaisingTakeNeverCostsMoreThanOneUnitLaterOn
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.test_theLensSequenceHoldsUnderTheRestatedClauseAndNotTheOldOne
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.testFuzz_theReanchorIsTheSameNumberWrittenSafely
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.testFuzz_aChainOfHalfLotTakesCostsAtMostFourTimesItsFirstTake
+      - test/audit/poc/SinkFloorErasure.t.sol:SinkFloorErasurePoC.test_aDustTakeDoesNotEraseTheFloorARealSaleSet
+      - test/audit/poc/SinkAnchorOverflow.t.sol:SinkAnchorOverflowPoC.test_aLotHoldingAnEntireSupplyCanStillBeBoughtFrom
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.test_aDustTakeSeedsAFloorOfDustAndLeavesTheColdStartAlone
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.test_noDescentStartsBeforeThePlatformCoinExists
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.test_theSinkOpensWhenTheWindowCloses
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.test_theSinkIsScheduledOnceByNamingTheWindow
+      - test/FeastPackageTwo.t.sol:FeastGenesisScriptTest.test_theGenesisScriptLeavesTheSinkOpeningAtTheWindowsClose
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.test_aNewDescentCarriesNoFloorFromTheLotBeforeIt
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.test_aTakeNeverRaisesTheSizeADescentPrices
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.test_aRefillIsPricedFromTheTopButNeverUnderTheFloor
+      - test/FeastPackageTwo.t.sol:FeastPlatformSinkTest.testFuzz_aDescentPricesALotExactlyWhenOpeningItIsRefused
+      - test/audit/poc/SinkPriceDecay.t.sol:SinkPriceDecayPoC.test_aRefillOfADecayedLotIsNotGivenAway
+  - id: P20
+    statement: No state-changing function has a privileged caller beyond the declared set.
+    severity_if_broken: HIGH
+    witnesses:
+      - test/FeastAuthority.t.sol:FeastAuthorityTest.test_afterGenesisTheGenesisKeyHoldsNoPower
+      - test/FeastAuthority.t.sol:FeastAuthorityTest.test_aStrangerHoldsNoPowerEither
+      - test/FeastGenesis.t.sol:FeastGenesisTest.test_itRunsOnceAndThenNothingIsPrivileged
+  - id: P21
+    statement: >-
+      Every commit in the launch window clears at one price. The pool opens at exactly that
+      price, so a committer who sells at the open loses only the fee and their own impact -
+      never a premium the window handed to whoever sold first. The whole pot stays in the pool
+      as permanently locked bid liquidity, and the seeding writes no oracle observation, so the
+      platform coin has no price the pricer will vouch for until it has actually traded.
+    severity_if_broken: HIGH
+    witnesses:
+      - test/FeastWindowAuction.t.sol:FeastWindowAuctionTest.test_theClearingPriceIsThePotOverTheTranche
+      - test/FeastWindowAuction.t.sol:FeastWindowAuctionTest.test_theClearingPriceRoundsAgainstTheCommitter
+      - test/FeastWindowAuction.t.sol:FeastWindowAuctionTest.test_theOpeningSpotEqualsTheClearingPrice
+      - test/FeastWindowAuction.t.sol:FeastWindowAuctionTest.test_aCommitterWhoSellsAtTheOpenLosesOnlyTheFee
+      - test/FeastWindowAuction.t.sol:FeastWindowAuctionTest.test_theWholePotIsInThePoolAsBidLiquidity
+      - test/FeastWindowAuction.t.sol:FeastWindowAuctionTest.test_theRemainingSupplyIsTheAskSide
+      - test/FeastWindowAuction.t.sol:FeastWindowAuctionTest.test_everyUnitOfTheTrancheIsClaimed
+      - test/FeastWindowAuction.t.sol:FeastWindowAuctionTest.testFuzz_everyCommittersCostIsTheSamePrice
+      - test/FeastWindowAuction.t.sol:FeastWindowAuctionTest.testFuzz_thePoolIsAlwaysSeededAndNeverRevertsOnRounding
+      - test/FeastWindowAuction.t.sol:FeastWindowAuctionInvertedTest.test_theFixtureReallyIsInverted
+      - test/FeastPackageTwo.t.sol:FeastPricerTest.test_thePlatformCoinIsUnpriceableUntilItHasHistory
+      - test/FeastRecipe.t.sol:FeastRecipeTest.test_fork_theAuctionSettlesOnTheRealVenue
+  - id: P22
+    statement: >-
+      The launch window's failure routes stay reachable: a seed that reverts leaves the window
+      unsettled and every commit refundable; an auction nobody settles by `abandonAt` refunds
+      every commit in full with no half-built pool behind it, and its coin still reaches the pool
+      afterwards; a pot below `MIN_POT`, or one whose price cannot be represented, is no
+      participation, never a revert, and refunds in full; and a no-commit window opens the pool
+      single-sided at the price the genesis key named. (Since v1.6.24, AstraSec M-2: `settle` has
+      no deadline and refunds open at `abandonAt`. Until then they opened after the grace hour,
+      and a pot too small to price was refused by name. Restated in v1.6.27.) Nothing the settlement does not place is left owned by nothing, but
+      for the rounding dust of quote a clearing settle leaves in the hook: at most 1e6 wei for
+      any pot up to 1,000,000 BNB, and never more than a 1e-15 share of the pot at any size.
+      Measured, it grows as the square root of the pot (937 wei at 1 BNB, 934,550 at 1,000,000);
+      the window's own test already allowed it (`test_theWholePotIsInThePoolAsBidLiquidity`,
+      under 1e6 wei), and it is tolerated rather than swept because it is worth less than any
+      transaction that could move it. The coin's remainder is burned. Amended in v1.6.27 by
+      the owner's ruling of 4 October 2026 on `CA-a364c3530f`; no code changed.
+    severity_if_broken: HIGH
+    witnesses:
+      - test/FeastWindowAuction.t.sol:FeastWindowAuctionTest.testFuzz_aClearingSettleLeavesOnlyDustOfQuote
+      - test/FeastWindowAuction.t.sol:FeastWindowAuctionTest.testFuzz_theQuoteDustIsNeverMoreThanAShareOfThePot
+      - test/FeastWindowAuction.t.sol:FeastWindowAuctionTest.test_theQuoteDustReachesItsBoundAtAMillionBnb
+      - test/FeastWindowAuction.t.sol:FeastWindowAuctionInvertedTest.testFuzz_aClearingSettleLeavesOnlyDustOfQuote
+      - test/audit/poc/SettleLeavesQuoteInTheHook.t.sol:SettleLeavesQuoteInTheHookTest.test_aClearingSettleLeavesNoQuoteOwnedByNothing
+      - test/FeastWindowAuction.t.sol:FeastWindowAuctionTest.test_aFailedSeedLeavesTheWindowUnsettledAndRefundable
+      - test/FeastWindowAuction.t.sol:FeastWindowAuctionTest.test_settleNotCalledInTheGraceOpensRefunds
+      - test/FeastWindowAuction.t.sol:FeastWindowAuctionTest.test_aPotTooSmallToPriceIsRefusedByName
+      - test/FeastWindowAuction.t.sol:FeastWindowAuctionTest.test_noCommitsOpensTheWholeSixtyPercentByTime
+      - test/FeastWindowAuction.t.sol:FeastWindowAuctionInvertedTest.test_aPotTooSmallToPriceIsRefusedByName
+      - test/FeastPackageTwo.t.sol:FeastLaunchWindowTest.test_anUnsettledWindowRefundsEveryCommitInFull
+  - id: P23
+    statement: >-
+      Only the factory, or a gated pool's own registered opener, may initialise a pool carrying
+      this hook. v1.6.11 widened this from factory-only so the launch window can open the
+      platform pool at settlement; an ordinary pool has no opener and stays factory-only.
+    severity_if_broken: HIGH
+    witnesses:
+      - test/FeastWindowAuction.t.sol:FeastWindowAuctionTest.test_nobodyButTheWindowCanInitialiseTheGatedPool
+      - test/FeastGenesis.t.sol:FeastGenesisTest.test_nobodyTradesThePlatformPoolBeforeTheWindowOpensIt
+      - test/FeastPackageTwo.t.sol:FeastLaunchWindowTest.test_nobodyElseTradesThePoolBeforeItOpens
+  - id: P24
+    statement: >-
+      After settlement the platform pool is ONE position spanning the whole usable range, with
+      liquidity sqrt(tranche * net), holding the unsold half of the pool share and the whole net
+      pot - both worth the same at the opening price, which is the clearing price exactly. Its
+      range is recorded on the pool, so its LP fees are collectable; the no-commit path's
+      single-sided position records its range for the same reason. Nothing else is placed, and
+      what the position did not take is burned rather than left owned by nothing.
+    severity_if_broken: HIGH
+    witnesses:
+      - test/FeastWindowAuction.t.sol:FeastWindowAuctionTest.test_thePlatformPoolIsOneFullRangePosition
+      - test/FeastWindowAuction.t.sol:FeastWindowAuctionTest.test_theNoCommitPoolsLpFeesAreCollectableToo
+      - test/FeastWindowAuction.t.sol:FeastWindowAuctionTest.test_theOpeningSpotEqualsTheClearingPrice
+      - test/FeastWindowAuction.t.sol:FeastWindowAuctionTest.testFuzz_thePoolIsAlwaysSeededAndNeverRevertsOnRounding
+      - test/FeastWindowAuction.t.sol:FeastWindowAuctionInvertedTest.test_thePlatformPoolIsOneFullRangePosition
+      - test/audit/poc/AuctionLpFeesStranded.t.sol:AuctionLpFeesStrandedPoC.test_thePlatformPoolsLpFeesAreCollectable
+      - test/audit/poc/AuctionLpFeesStranded.t.sol:AuctionLpFeesStrandedPoC.test_theAuctionSeedRecordsTheRangesItPlaced
+  - id: P25
+    statement: >-
+      Genesis signs the platform pool's fallback opening PRICE and nothing else. The tick is
+      floored from it and the liquidity derived from the holding at settlement, so no two signed
+      numbers can disagree; a price the settlement could not serve is refused inside the genesis
+      transaction, by name, never by panic.
+    severity_if_broken: HIGH
+    witnesses:
+      - test/audit/poc/NoCommitOpeningUnsettleable.t.sol:NoCommitOpeningUnsettleablePoC.testFuzz_everyPriceGenesisAcceptsSettles
+      - test/audit/poc/NoCommitOpeningUnsettleable.t.sol:NoCommitOpeningUnsettleablePoC.test_anyPriceGenesisSignsSettlesOnTheNoCommitPath
+      - test/audit/poc/NoCommitOpeningUnsettleable.t.sol:NoCommitOpeningUnsettleablePoC.test_aPriceOutsideTheUsableRangeIsRefusedAtGenesis
+      - test/FeastTickMath.t.sol:FeastTickMathTest.test_theWindowsLiquidityCeilingIsTheVenuesOwn
+  - id: P26
+    statement: >-
+      Only the creator may ask for the creator's pre-buy: `create` refuses a pre-buy whose caller
+      is not the named creator, so an approval given to the factory cannot be spent by anybody
+      else on a coin or a vesting schedule its owner did not choose.
+    severity_if_broken: HIGH
+    witnesses:
+      - test/audit/poc/PrebuySpendsAnothersAllowance.t.sol:PrebuySpendsAnothersAllowancePoC.test_aStrangerCannotSpendACreatorsApproval
+      - test/audit/poc/PrebuySpendsAnothersAllowance.t.sol:PrebuySpendsAnothersAllowancePoC.test_aCreatorCanPrebuyTheirOwnCoin
+      - test/audit/poc/PrebuySpendsAnothersAllowance.t.sol:PrebuySpendsAnothersAllowancePoC.test_creatingACoinForSomebodyElseWithNoPrebuyStillWorks
+  - id: P27
+    statement: >-
+      Nobody, the guardian included, can move funds OR MOVE A PRICE. The guardian holds exactly
+      two powers - a one-way stop on coin creation and a bounded pause of outflows - and neither
+      moves a token, changes a share, or shifts any price or deadline. **The price clause is not
+      decoration**: the v1.6.12 round found that a freeze stopped the sink's buyers and not its
+      descent, so seventy-two hours of brake halved the price seventy-two times and the guardian
+      could buy at the number its own pause produced. EVERY clock a freeze can reach measures OPEN
+      TIME only: the sink's descent AND ITS FLOOR, the emission claim grace, settlement's pricing
+      grace, the platform price's aging, and the two ninety-day windows. Each was found by the
+      round after the previous fix, because each fix went to the sites that had been reported
+      rather than to the shape; `plans/audit/freeze-clock-sweep.md` is the enumeration of all 72
+      clock reads in `src/`, and `tools/check-boundaries.py freeze-clocks` fails if one is added
+      without a row.
+      **Open time, not open BLOCKS** (v1.6.15): the block half of that rule was withdrawn because
+      a contract cannot observe its chain's block rate, so a frozen-block counter can only be an
+      estimate - and the estimate was short by four on BSC, which spent the whole window it
+      existed to protect. A BLOCK window is anchored on an event a freeze cannot spend instead:
+      the opening purchase cap arms at a pool's first SERVED swap, one site for both kinds of
+      pool, so there is no clock between the arming and the check.
+      **THE ONLY FREEZE IS ALL-SCOPE; it moves every clock it refuses, and no price outside
+      it** (v1.6.17, owner ruling). ~~v1.6.15's per-scope accounting, and v1.6.16's
+      `frozenSecondsFor(poolId)` / `unfrozenAtFor(poolId)`~~ — RETIRED 2026-09-22 with the
+      pool-scoped freeze itself. The surgical freeze was the instrument every defeat of the
+      opening purchase cap needed: five redesigns, each beaten by a guardian that could stop
+      everyone else in one pool while still trading there. A freeze covering everything refuses
+      the guardian's own trades too, so it cannot be used to clear a room. One counter, one
+      resume instant, one predicate.
+      What it costs, recorded rather than glossed: a defect in one coin's pool can only be
+      answered by pausing outflows everywhere, and the only freeze also halts coin creation for
+      as long as it lasts - which a pool-scoped freeze never did.
+      **And no freeze may be placed in the block an unfreeze cleared** (v1.6.18). Removing the
+      scope stopped the guardian standing OUTSIDE a freeze; it did not stop it standing BETWEEN
+      two, and one transaction of unfreeze/trade/freeze served an opening block no stranger
+      could reach - the sixth redesign of the cap falling to the same shape as the five before
+      it. The bracket can no longer close in the block it opened.
+      **And EVERY ending stamps it, not only an unfreeze** (v1.6.19): the stamp moved into
+      _clear(), which unfreeze and expire share - and a LAPSE passes through neither, because a
+      freeze that runs out has no transaction in it. So a lapse gets one: settleLapsed(),
+      permissionless, with freeze() refusing until it has happened. The bound that remains is
+      stated: the guardian may still TRADE in the block a lapse opens, but cannot close the
+      bracket behind itself, so that block is open to every stranger and taking it needs
+      BLOCK-BUILDER COLLUSION. Operational cost, recorded: every lapsed freeze needs a settling
+      transaction before the guardian can freeze again.
+      **Anything measured against an oracle AVERAGE waits a full TWAP_WINDOW of OPEN time**
+      (v1.6.16, ruling 3, and it stands): a freeze writes no observations, so an average drifts
+      onto the pinned spot with no trade at all and a price a bound REFUSED becomes one it
+      accepts. All three reads of an average in `src/` carry that condition, and
+      `audit/guardian-reads.allow` enumerates every read of a guardian counter or an average
+      with its decision, so a fourth site cannot be added without one -
+      `tools/check-boundaries.py guardian-reads`. v1.6.16 needed a per-pool resume instant
+      here; v1.6.17 removed the scope that made one necessary, so they all read
+      `allUnfrozenAt()`.
+    severity_if_broken: HIGH
+    witnesses:
+      - test/FeastGuardian.t.sol:FeastGuardianTest.testFuzz_theGuardianCannotMoveAWei
+      - test/FeastGuardian.t.sol:FeastGuardianTest.test_aStrangerIsRefused
+      - test/audit/poc/FreezeRunsTheDescentClock.t.sol:FreezeRunsTheDescentClockPoC.test_aFreezeDoesNotDiscountTheSinkForTheGuardian
+      - test/audit/poc/FreezeRunsTheDescentClock.t.sol:FreezeRunsTheDescentClockPoC.test_theGuardianCannotBuyTheLotAtAPriceItsOwnBrakeSet
+      - test/audit/poc/FreezeExpiresAClaim.t.sol:FreezeExpiresAClaimPoC.test_aFreezeCannotEatAClaimsOwnDeadline
+      - test/audit/poc/FreezeExpiresAClaim.t.sol:FreezeExpiresAClaimPoC.test_burnExpiredCannotFireOnAFrozenClaimWindow
+      - test/audit/poc/FreezeClockFixesLeftThreeGaps.t.sol:FreezeClockFixesLeftThreeGapsPoC.test_aDustTakeDoesNotSpendTheFreezeOnTheFloor
+      - test/audit/poc/FreezeClockFixesLeftThreeGaps.t.sol:FreezeClockFixesLeftThreeGapsPoC.test_aFreezeDoesNotSpendAnUngatedPoolsCapWindow
+      - test/audit/poc/FreezeClockFixesLeftThreeGaps.t.sol:FreezeClockFixesLeftThreeGapsPoC.test_aGatedPoolsWindowCountsOnlyTheBlocksItServed
+      - test/audit/poc/FreezeClockFixesLeftThreeGaps.t.sol:FreezeClockFixesLeftThreeGapsPoC.test_aPrebuyDoesNotArmTheOpeningCap
+      - test/audit/poc/FreezeRunsTheSettlementClocks.t.sol:FreezeRunsTheSettlementClocksPoC.test_aFreezeDoesNotConsumeTheSettlementPricingGrace
+      - test/audit/poc/FreezeRunsTheSettlementClocks.t.sol:FreezeRunsTheSettlementClocksPoC.test_theGraceIsUnchangedWhenNobodyTouchesTheBrake
+      - test/audit/poc/FreezeRunsTheSettlementClocks.t.sol:FreezeRunsTheSettlementClocksPoC.test_aFreezeDoesNotAgeAMovedPriceIntoAnAcceptedOne
+      - test/audit/poc/FreezeRunsTheSettlementClocks.t.sol:FreezeRunsTheSettlementClocksPoC.test_theAgingRuleAndTheGraceReadTheSameInstantAndAgree
+      - test/audit/poc/FreezeRunsTheSettlementClocks.t.sol:FreezeRunsTheSettlementClocksPoC.test_aFreezeDoesNotConsumeTheSettlementPricingGraceThroughTheAgingRule
+      - test/FeastBuyback.t.sol:FeastBuybackTest.test_aFrozenHourAndAnIdleHourLeaveTheSameAllowance
+      - test/audit/poc/FreezeAgesTheButtonsBound.t.sol:FreezeAgesTheButtonsBoundPoC.test_aFreezeDoesNotAgeAMovedSpotPastTheButtonsBound
+      - test/audit/poc/FreezeAgesTheButtonsBound.t.sol:FreezeAgesTheButtonsBoundPoC.test_theButtonWorksAgainAfterAnAveragingWindowOfOpenTime
+      - test/audit/poc/FreezeRunsTheOtherClocks.t.sol:FreezeRunsTheOtherClocksPoC.test_aFreezeDoesNotDecayTheSinksFloor
+      - test/audit/poc/FreezeRunsTheOtherClocks.t.sol:FreezeRunsTheOtherClocksPoC.test_aFreezeDoesNotConsumeTheOpeningCapWindow
+  - id: P28
+    statement: >-
+      The brake is bounded on chain: at most 72 hours per freeze, expiring by itself with no
+      action from anyone; at most 168 hours cumulatively over the guardian's life; and the freeze
+      power ends 90 days after GENESIS - the instant the factory reports, not the guardian's own
+      deploy - after which freeze reverts for ever and anyone may clear a freeze left standing.
+      Before genesis the clock has not started: there is no deadline, the brake is fully live,
+      and nothing that reads a deadline may act.
+      **And the budget bounds the COUNT of pulls, not only their duration** (v1.6.15, owner
+      ruling 5): every freeze costs at least MIN_FREEZE_CHARGE = 1 hour whatever happens, so
+      `unfreeze` refunds only the tail above it and at most 168 pulls exist over the guardian's
+      life. Before this, a freeze lifted in the second it was placed refunded its whole grant, so
+      a freeze/unfreeze pair per block refused every guarded call ordered between them for ever
+      and the 168-hour bound did not bind the one thing it exists to bound. The minimum binds the
+      BUDGET and never the clocks - a one-second freeze still delays every deadline by one second
+      and not by an hour. The brake is an emergency instrument: any automated caller must expect
+      every pull to cost an hour of budget, and no such caller exists in this repository.
+    severity_if_broken: HIGH
+    witnesses:
+      - test/FeastGuardian.t.sol:FeastGuardianTest.test_aFreezeExpiresByItselfAfterSeventyTwoHours
+      - test/FeastGuardian.t.sol:FeastGuardianTest.test_theCumulativeBudgetIsOneWeek
+      - test/FeastGuardian.t.sol:FeastGuardianTest.test_theGuardianMayUnfreezeEarly
+      - test/FeastGuardian.t.sol:FeastGuardianTest.test_afterDayNinetyFreezeRevertsForEver
+      - test/FeastGuardian.t.sol:FeastGuardianTest.test_anyoneMayExpireALingeringFreeze
+      - test/FeastGuardian.t.sol:FeastGuardianTest.test_expireIsRefusedBeforeTheSunset
+      - test/FeastGuardian.t.sol:FeastGuardianTest.test_beforeGenesisTheBrakeIsLiveAndTheDeadlineIsNotSet
+      - test/FeastGuardian.t.sol:FeastGuardianTest.test_onlyTheFactoryStartsTheClockAndOnlyOnce
+      - test/audit/poc/GuardianClockStartsAtGenesis.t.sol:GuardianClockStartsAtGenesisPoC.test_theNinetyDaysRunFromGenesis
+      - test/audit/poc/GuardianClockStartsAtGenesis.t.sol:GuardianClockStartsAtGenesisPoC.test_aSlotIsStillFillableOnDayEightyNineAfterGenesis
+      - test/audit/poc/GuardianClockStartsAtGenesis.t.sol:GuardianClockStartsAtGenesisPoC.test_theBrakeIsAliveForNinetyDaysAfterGenesis
+      - test/audit/poc/ScopedFreezeAndMinimumCharge.t.sol:ScopedFreezeAndMinimumChargePoC.test_aFreezeLiftedInItsOwnSecondStillCostsAnHour
+      - test/audit/poc/ScopedFreezeAndMinimumCharge.t.sol:ScopedFreezeAndMinimumChargePoC.test_theLifetimeBudgetAllowsExactlyOneHundredAndSixtyEightPulls
+      - test/audit/poc/ScopedFreezeAndMinimumCharge.t.sol:ScopedFreezeAndMinimumChargePoC.test_anOrdinaryFreezeIsChargedExactlyAsBefore
+  - id: P29
+    statement: >-
+      Creation, once stopped, stays stopped, and that is the one power that outlives day 90. A
+      freeze reaches exactly the functions the guarded-surface table names and no others - the
+      launch window's commit, settle, claim and refund among the others, because its refunds are
+      on a clock a freeze must never push them past.
+    severity_if_broken: HIGH
+    witnesses:
+      - test/FeastGuardian.t.sol:FeastGuardianTest.test_stopCreationIsOneWay
+      - test/FeastGuardian.t.sol:FeastGuardianTest.test_stopCreationOutlivesTheSunset
+      - test/FeastGuardian.t.sol:FeastGuardianTest.test_everyGuardedPathRevertsWhileFrozenAndWorksAfter
+      - test/FeastGuardian.t.sol:FeastGuardianTest.test_aFreezeStopsEveryPoolBecauseThereIsNoOtherKind
+      - test/FeastGuardian.t.sol:FeastGuardianTest.test_theWindowSettlesAndRefundsDuringAFreeze
+      - test/FeastGuardian.t.sol:FeastGuardianTest.test_anUnsettledWindowStillRefundsDuringAFreeze
+    project_checks:
+      - tools/check-boundaries.py freeze-clocks
+      - tools/check-boundaries.py guarded
+      - tools/check-boundaries.py settlement-deadline
+  - id: P30
+    statement: >-
+      An empty genesis-partner slot may be filled exactly once, by the team multisig - the same
+      address that holds the guardian's brake, read from the guardian so the two cannot differ -
+      and only inside the guardian's own 90-day window. A slot filled at genesis or filled since
+      is immutable: nobody can replace, remove or reassign a partner. The assignment moves no
+      value, the six-month unlock clock is not restarted, and an emission week that had already
+      closed when a slot was filled counts zero toward it. A slot nobody fills burns once the
+      window closes, so no grant strands.
+    severity_if_broken: HIGH
+    witnesses:
+      - test/FeastPackageTwo.t.sol:FeastGenesisGrantsTest.test_theTeamMultisigMayFillAnEmptySlotOnce
+      - test/FeastPackageTwo.t.sol:FeastGenesisGrantsTest.test_aStrangerCannotFillASlot
+      - test/FeastPackageTwo.t.sol:FeastGenesisGrantsTest.test_aFilledSlotIsImmutable
+      - test/FeastPackageTwo.t.sol:FeastGenesisGrantsTest.test_afterDayNinetyNoSlotCanBeFilled
+      - test/FeastPackageTwo.t.sol:FeastGenesisGrantsTest.test_anAssignedPartnerEarnsFromReferralsMadeAfterAssignment
+      - test/FeastPackageTwo.t.sol:FeastGenesisGrantsTest.test_anUnfilledSlotBurnsAtTheDeadline
+  - id: V1-CARRIED
+    statement: Every v1 invariant (I1-I15, docs/plan.md section 3) still holds; conservation, exact per-quote solvency, per-pool isolation and pays-the-recorded-owner are checked statefully.
+    severity_if_broken: HIGH
+    witnesses:
+      - test/FeastBuckets.t.sol:FeastBucketsTest.testFuzz_theFourSharesAlwaysSumToWhatWasTaken
+      - test/FeastFeeTake.t.sol:FeastFeeTakeTest.testFuzz_exactInAndExactOutAgreeOnPrice
+    harness:
+      - test/audit/invariants/FeastInvariants.t.sol:FeastInvariants.invariant_conservation
+      - test/audit/invariants/FeastInvariants.t.sol:FeastInvariants.invariant_solvency
+      - test/audit/invariants/FeastInvariants.t.sol:FeastInvariants.invariant_ghosts
+    medusa:
+      - FeastProperties.property_conservation()
+      - FeastProperties.property_solvency()
+      - FeastProperties.property_ghosts()

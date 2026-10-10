@@ -1,0 +1,108 @@
+AUDITED_TREE=d597a059b8c1049e63e2e0ae937f34c64118a1af
+
+I read the six package-1 Solidity files, the complete `git diff 4d008d1 -- src`, their supporting hook, accounting, token and venue code, the package-1 tests and fixtures, relevant v1 regression tests, `docs/plan.md` §§3–4 and §6, audit history, census and mutation tools, and the v1.6 plan and brief. I attempted `forge build --offline` and `forge test --offline`; both stopped at a denied cache write. No Solidity, fork or mutation tests executed.
+
+**HIGH — none established.**
+
+**MEDIUM**
+
+**M1 — The gate does not cover the hook’s own buyback swap.**
+
+`buyBackAndBurn` checks funding, allowance and price history, but never `openAt`. Its venue swap skips the hook callbacks, including the only gate check. It subsequently pays a token tip to its caller. [Buyback entry](src/FeastHook.sol:844), [swap](src/FeastHook.sol:564), [tip](src/FeastHook.sol:885).
+
+Concrete construction:
+
+1. Genesis uses the existing fixture’s valid 1:1 seed configuration and sets `openAt = genesisTime + 25 hours`.
+2. At `genesisTime + 24 hours`, the named opener buys with `10e18` wrapped-native units, without a referral. The opening block cap has expired.
+3. This banks a fee of `99,009,900,990,099,009` units and a self-burn entitlement of `79,207,920,792,079,208`, and records the prevailing tick.
+4. Leave the price unchanged for 300 seconds. The oracle now accepts its history, and spending allowance is `990,099,009,900,990` units.
+5. A stranger calls `buyBackAndBurn(key, 1e18)`. The request is clamped to that positive allowance; the deep pool produces positive output, the hook completes the swap before `openAt`, and the stranger receives a positive tip.
+
+This violates P5. It requires an earlier opener swap; I did **not** establish a buyback before the first opener swap, when the oracle has no observations. The gate tests exercise router swaps only, and the gate census omits this path. [Tests](test/FeastGate.t.sol:40), [census](docs/site-census.md:162).
+
+**Fix and second-order check:** explicitly refuse hook-owned buybacks while gated. Preserve the opener’s ordinary swap path and post-opening buybacks. Enabling the skipped callbacks instead would introduce self-fees and opening-cap checks into v1’s buyback path.
+
+**M2 — Genesis accepts allocation recipients that leave 35% of supply permanently in the factory.**
+
+The three allocation recipients need only have code. Consequently, the genesis key can supply:
+
+```solidity
+teamVesting = address(factory);
+emissions   = address(factory);
+grants      = address(factory);
+```
+
+Keep the window, sink, gate and seed parameters valid. All recipient checks pass, as does the initial whole-supply custody check. Each subsequent allocation transfer is a self-transfer. Genesis succeeds with `350_000_000e18` FEAST still in the factory and `genesisDone == true`. No factory function can release those existing tokens. [Checks](src/FeastFactory.sol:228), [transfers and completion](src/FeastFactory.sol:262).
+
+This is an authorized configuration error, not a permissionless attack. It nevertheless directly contradicts P9’s mandatory empty-factory outcome. The split witness uses distinct external holders and therefore misses it. [Witness](test/FeastGenesis.t.sol:148).
+
+**Fix and second-order check:** reject the factory as any allocation recipient and enforce a zero final factory balance. This preserves legitimate allocations and introduces no recovery authority or new swap refusal.
+
+**LOW**
+
+**L1 — The P6 witness does not independently enforce fourteen days.**
+
+Changing `MAX_GATE_DURATION` from `14 days` to `28 days` would leave both bound witnesses’ expectations consistent with the changed implementation: they derive their accepted and rejected timestamps from that same constant. The registered mutation doubles the hook’s comparison instead, so it does not cover this construction. [Gate witness](test/FeastGate.t.sol:119), [genesis witness](test/FeastGenesis.t.sol:95), [mutation](tools/mutate.py:342).
+
+The current constant is correct. Add literal fourteen-day boundary assertions and a mutation of the constant itself. This changes verification only.
+
+**L2 — New implementation sites remain absent from their census mechanisms.**
+
+Beyond M1’s missing buyback gate path, package 1 adds these unlisted consumers:
+
+- `_seed` and `genesis` under principal-locking; the section still lists only `create` as the factory path. [Census](docs/site-census.md:91).
+- `releasePlatformFees` under reentrancy and asset-backing. Its bounded-settlement, realised-spend and isolation rows are present. [Reentrancy section](docs/site-census.md:200), [asset-backing section](docs/site-census.md:228).
+- The platform token’s construction and inherited supply-changing surface under fixed-supply. Its genesis-once entry does not enumerate those obligations in the fixed-supply section. [Census](docs/site-census.md:333).
+- The new ledger’s `_fits`, decoding/read helpers and `weekStart` under fee-attribution. [Census](docs/site-census.md:146).
+
+These are additions beyond the standing v1 enumeration residue. Add their corresponding witnesses and ordering arguments; this requires no contract behavior change.
+
+**L3 — The normative bytecode-verification claim has no implementation at this pin.**
+
+The plan says package-1 runtime hashes are pinned and re-derived by a test. No such test or runtime-hash comparison exists in the inspected test tree; the brief names the absent `test/FeastBytecodePin.t.sol`. [Present-tense claim](plans/v16/plan.md:154), [brief record](docs/audit-briefs/v16-package1.md:96).
+
+The brief’s freeze record is explicitly unfinished. Mark the plan’s claim pending until the check exists, or implement the promised check. This is an evidence/documentation finding, with no demonstrated bytecode-independence failure.
+
+**Acceptance and refusal assessment**
+
+| Change | What the code accepts and refuses |
+|---|---|
+| Ledger packing | Only `recorder` may call. Each nonzero role receives the whole amount only when its track has headroom. Zero amounts and oversized amounts produce no credit. `_fits` short-circuits before adding an oversized amount; eligible field additions remain within 80 bits. Each account remains bounded by its corresponding total, and the complete packed word remains below `2^240`. The coalescing logic handles every role coincidence, including directly recorded payer/referrer coincidences and independently saturated tracks. I found no arithmetic input the correctly wired hook can pass that reverts recording. [Implementation](src/FeastFeeLedger.sol:111). |
+| Clock and constants | The split is exactly 6,500 / 2,000 / 1,420 / 80 bps. The three-day additive alignment gives Monday boundaries. Public clock helpers can revert for out-of-domain values such as `weekStart(0)`; that does not enter the realistic swap path. [Clock](src/FeastFeeLedger.sol:82), [constants](src/FeastGenesis.sol:54). |
+| Ordinary swap gate | All four fee branches encounter the gate before any fee-related early return. Registration refuses mismatched gate/opener pairs, expired gates and gates beyond fourteen days. Zero-gate pools cannot fail this comparison. The deadline lifts automatically even if the opener is unusable. LP modification and donation do not themselves execute swaps; they do not remove the gate. M1 covers the separate self-swap path. [Registration](src/FeastHook.sol:201), [swap gate](src/FeastHook.sol:371). |
+| Referral | `_referrerFrom` is the sole resolver used by both fee callbacks. Wrong-length data, dirty upper bits and `referrer == tx.origin` resolve to zero. The same resolved value reaches commission banking and the ledger, suppressing both consequences. A distinct referral still receives ledger credit when commission is zero, as ruled. [Resolver](src/FeastHook.sol:342). |
+| Platform exit | Anyone may trigger it, but cannot choose its destination. The immutable factory’s generated getter supplies the once-written sink. A code-less sink refuses; otherwise payment is `min(pending, MAX_SETTLEMENT)`, with precisely that nominal amount added to `platformUsed` before payout. The other three callers use bounded components or a shared budget. Full-key hashing prevents substituting another quote for an existing pool’s entitlement. Token refusal rolls back the debit; nested payout locks cannot withdraw another bucket. I found no new cross-pool theft construction. [Exit](src/FeastHook.sol:808), [shared payout](src/FeastHook.sol:628). |
+| Genesis and pre-genesis | Key-only and once-only checks precede deployment. The dedicated deployer authenticates the factory and uses fixed CREATE2 inputs; ordinary `create` cannot occupy that address. Foreign initialization of the same hooked pool is refused. A different pool key denotes a different pool and does not replace it. Initial whole-supply custody and fixed allocation arithmetic hold; final custody fails under M2. Ordinary coins retain the shared seed sequence, including the declared bounded seed remainder. [Deployer](src/FeastPlatformTokenDeployer.sol:32), [initialization authority](src/FeastCLHookBase.sol:84). |
+
+The exit inherits `_release`’s existing **nominal-versus-recipient-delivery** limitation for unusual tokens. Its tests establish ordinary-token delivery, not universal transfer-tax semantics. That class was expressly withdrawn in v1; I have not counted it again. [Recorded disposition](docs/audit/round10-r10a-coverage.txt:35).
+
+**P1–P9 evidence**
+
+These assessments concern the assertions inspected, not executed test results.
+
+| Invariant | Named witness and whether it distinguishes the failure |
+|---|---|
+| P1 | [`testFuzz_eachTotalIsExactlyTheSumOfItsAccounts`](test/FeastFeeLedger.t.sol:221) compares all three account sums against totals after interleaved, coinciding roles. Yes: duplicate or omitted account credits can fail it. |
+| P2 | [`test_aSaturatedTrackSkipsOnlyItselfAndOnBothSides`](test/FeastFeeLedger.t.sol:186) and `test_aFeeLargerThanATrackIsIgnoredNotReverted` distinguish saturation refusal and unwanted credit. They exercise the ledger directly; the connected swap witnesses separately establish hook wiring. |
+| P3 | [`test_eachBranchCreditsTheWholeFeeToPayerCreatorAndReferrer`](test/FeastAttribution.t.sol:38), plus zero-role, burn-creator, week and quote tests, distinguish wrong roles, shares and partitions. |
+| P4 | [`test_aSelfReferralIsNoReferralOnAnyBranch`](test/FeastAttribution.t.sol:68) checks both commissions and referral credit across all four branches. Yes. |
+| P5 | [`test_beforeOpenAtAStrangerCannotTradeOnAnyBranch`](test/FeastGate.t.sol:40), opener, exact-deadline and ungated tests distinguish callback-path errors. None detects M1. |
+| P6 | Gate/opener mismatch tests distinguish missing validation; [`test_theOpenersTradeIsChargedButRecordedNowhere`](test/FeastGate.t.sol:70) distinguishes unwanted recording on its exercised branch. The literal fourteen-day guarantee remains L1. |
+| P7 | [`test_aBucketLargerThanOneSettlementLeavesInPieces`](test/FeastPlatformExit.t.sol:118), recipient, other-bucket, refill and freeze tests distinguish ordinary payout defects. The freeze test exercises one pool, not the advertised hostile-callback/multiple-pool construction. |
+| P8 | [`test_itRunsOnceAndThenNothingIsPrivileged`](test/FeastGenesis.t.sol:54) and [`test_afterGenesisTheGenesisKeyHoldsNoPower`](test/FeastAuthority.t.sol:75) distinguish the explicit guards. Removing `genesisDone` still leaves CREATE2 preventing another mint; the registered mutation is caught by the changed revert selector, not by successful double minting. |
+| P9 | [`test_theSplitIsSixtyFiveTwentyFifteenToTheUnit`](test/FeastGenesis.t.sol:148) detects incorrect shares and retained tokens for its normal recipients. It correctly includes the bounded seed remainder sent to the burn address. It does not explore recipient aliasing, so M2 survives. |
+
+The v1 suite is **adapted**, rather than literally unchanged: the epoch suite was replaced and fixtures were rewired. The substantive interleaved-conservation and bounded-claim witnesses retain distinguishing assertions. The eight-swap fee comparison retains its declared 0.1% tolerance; it remains a regression check, not a wei-scale proof. I found no additional reopening of a closed v1 class beyond the new gate and genesis issues above. [Conservation sequence](test/FeastAccounting.t.sol:183), [shared settlement witness](test/FeastClaimBound.t.sol:201), [fee comparison](test/FeastFeeTake.t.sol:286).
+
+**EXECUTION-NOTES — uncounted**
+
+- Initial and final HEAD matched the pin. All 92 tracked review-path files checked matched their pinned contents. No files were changed.
+- Census verification, its secondary scan and all 117 row self-tests passed. Removing each of the five settlement rows in memory caused the settlement check to fail.
+- All 65 mutation anchors occur uniquely. Mutation kills were not run.
+- Integer models passed 3,584,000 exhaustive reduced-width ledger transitions and 64,000 transitions using actual 80-bit fields. These are not EVM executions.
+- Boundary checking passed licence, authority and surface checks; identity checking failed on the pre-existing `.runs/awaiting.json` modification.
+- No new applicable prose implementation over an open platform/grammar domain was identified.
+
+scheme-entity findings this round: yes — the gate omission and missing final-custody guarantee belong to the original package-1 design.
+
+VERDICT: HIGH=0 MEDIUM=2 LOW=3

@@ -1,0 +1,119 @@
+AUDITED_TREE=f8e0a1fed56cadc44f1dd50c5d81d6a92f9d0e7e
+
+**1. Is any site missing from the census? Yes.**
+
+I checked all **17 active mechanisms**. Existing census-coverage deficiencies are not counted again as findings.
+
+| Mechanism | Assessment |
+|---|---|
+| fee-conservation | No additional missing site identified. |
+| opening-caps | No additional missing site identified. |
+| principal-locking | Seed, collection and their entry points are listed. |
+| vesting-entitlement | No additional missing site identified. |
+| oracle-write | Ordinary swaps, self-buyback and same-second replacement are listed. |
+| realised-spend | `_release` and its payout-dispatch branch remain omitted. [Source](src/TorchHook.sol:722) |
+| epoch-attribution | `currentEpoch`, which selects the earning day, remains omitted. [Source](src/TorchEpochRewards.sol:44) |
+| route-authority | No additional missing site identified. |
+| reentrancy | Direct claims, `_release`, buyback, LP collection, converter `_hop` and vesting `claim` still need their ordering or enclosing-lock arguments. [Vesting example](src/TorchVesting.sol:77) |
+| execution-value | Converter execution/history helpers, buyback’s validation call and oracle search/interpolation remain incompletely listed. [Oracle example](src/TorchOracle.sol:138) |
+| asset-backing | Direct-claim accounting, converter transfers, buyback/LP settlement and factory vesting funding remain incompletely listed. [Funding example](src/TorchFactory.sol:149) |
+| spending-rate | `_allowanceShape`, pending/allowance readers, LP collection and the callback supplying realised spend remain omitted. No reassessment of the settled allowance design. [Shape](src/TorchHook.sol:853) |
+| bounded-settlement | **`_release` is missing.** The section lists three callers; the checker explicitly excludes the primitive. [Census](docs/site-census.md:239), [exclusion](tools/check-census.py:312) |
+| launch-identity | `predictCoin`, `_buildKey` and `_onPoolInitialized` remain omitted. [Prediction](src/TorchFactory.sol:182) |
+| fixed-supply | No additional implementation site identified. |
+| pool-isolation | Banking, purchase-ledger writes, payouts and oracle/epoch storage operations remain incompletely listed. [Banking](src/TorchHook.sol:934) |
+| swap-admission | Checked narrowing and connected oracle/epoch writes remain omitted. [Narrowing](src/TorchMath.sol:17) |
+
+The new checker correctly covers the **three direct callers** present in this tree. Its passing result does not establish the advertised four-site enumeration or verify their predicates.
+
+**2. Is there a guarded behaviour without a `### mechanism:` section? Yes.**
+
+These previously identified mechanisms still lack dedicated sections:
+
+- **Callback/writer authentication:** manager, vault, active conversion pool, oracle writer and epoch recorder authority. [Callback guards](src/TorchCLHookBase.sol:55)
+- **Venue encoding compatibility:** callback ABI, signed deltas, pool-key hashing and parameter packing. [Packing](src/TorchParameters.sol:23)
+- **Dead-address disposition:** zero-creator refusal, burn-creator redirection and seed/LP disposal. [Redirection](src/TorchHook.sol:964)
+
+Bounded-claim liveness now has a section; its missing primitive belongs in answer 1.
+
+PATCHED — r11a H1: referrer claims now subtract the payment and preserve the excess. All current settlement paths satisfy the arithmetic checks below; enforcement remains distributed among callers. [Debit](src/TorchHook.sol:633)
+
+CLOSED BY WITHDRAWAL — r11a H2: accepted boundary B6; LP collection’s venue ceiling is declared, not repaired or re-reported. [Declaration](docs/plan.md:734)
+
+PATCHED — r11a M1: claim-documentation corrections remain incomplete; M1 below.
+
+PATCHED — r11a M2: the young-pool witness is sound; the I11 tolerance and real-token freeze deficiencies remain; M2 below.
+
+PATCHED — r11b H1: the same referrer-debit repair and settlement-class assessment as r11a H1.
+
+PATCHED — r11b M1: the same unresolved claim-documentation discrepancies; M1 below.
+
+PATCHED — r11b M2: the same unresolved witness deficiencies; M2 below.
+
+**HIGH — none found.**
+
+For ordinary, non-taxing quote-token transfers, the four settlement sites satisfy the bounded-payment predicate:
+
+| Site | Result |
+|---|---|
+| `claimCreator` | Pays `min(creatorPending, MAX_SETTLEMENT)` and increments `creatorPaid` by exactly that payment. [Source](src/TorchHook.sol:610) |
+| `claimReferrer` | Pays `min(referrerPending, MAX_SETTLEMENT)` and subtracts exactly that payment. The unpaid remainder survives. [Source](src/TorchHook.sol:622) |
+| `_claimTo` | Creator payment consumes the shared budget before referral payment is selected. Each ledger loses only its own contribution. [Source](src/TorchHook.sol:700) |
+| `_release` | Opens one payout lock with the bounded amount supplied by its callers. The callback burns and transfers that same amount; transfer failure reverts the preceding ledger changes. [Primitive](src/TorchHook.sol:722), [settlement](src/TorchHook.sol:584) |
+
+Let `M = MAX_SETTLEMENT`, with creator and referral balances `C` and `R`. `_claimTo` pays:
+
+`a = min(C, M); b = min(R, M − a)`
+
+Therefore `a + b ≤ M`, and the remaining entitlements are exactly `C − a` and `R − b`. A non-creator receives only the referral component. Repeated calls drain a fixed entitlement without discarding or double-counting either component.
+
+The public `claim` wrapper can pay **two settlement-sized amounts in one transaction**, through two separate locks. This respects the per-settlement bound. No creator/referrer payout bypasses `_release`. [Wrapper](src/TorchHook.sol:654)
+
+Other settlement operations exist outside that payout class: seed funding, buyback settlement, LP collection and direct ERC-20 vesting payment. They do not provide an alternate creator/referrer withdrawal path. [Buyback settlement](src/TorchHook.sol:529), [vesting payment](src/TorchVesting.sol:77)
+
+**MEDIUM**
+
+**M1 — Round-11 claim documentation still promises unavailable behaviour.**
+
+The documentation’s promised acceptance set remains wider than the implementation:
+
+- **“Everything” in one claim:** accrue an entitlement above `MAX_SETTLEMENT`, then call `claimCreator` or `claim`. A successful call can leave an unpaid remainder despite the notices promising everything. [Creator notice](src/TorchHook.sol:606), [wrapper notice](src/TorchHook.sol:649)
+- **Quote claiming “always works”:** accrue a claim, then freeze its quote token. Payment reverts while entitlement survives. The interface and I15 still promise unconditional availability. [Interface](docs/interface.md:237), [I15](docs/plan.md:399), [freeze/recovery witness](test/TorchIsolation.t.sol:133)
+- **Retry conversion with smaller `amountIn`:** choose a route too shallow for a creator-only entitlement below the ceiling. `claimAsBnb` has no amount argument; retries offer that same entitlement again. Plain quote claiming remains available under normal token semantics. [Retry guidance](docs/plan.md:553), [API](src/TorchHook.sol:666)
+
+Correct the guidance to describe bounded withdrawals, freeze-dependent delivery and the actual conversion API. These are documentation defects, not requests to restore withdrawn mechanisms.
+
+**M2 — Two rewritten witnesses still do not establish their advertised guarantees.**
+
+**Real-token freeze:** the fixture funds the placeholder token from `placeholderHolder`, but probes its frozen transfer from **`AAPLB_HOLDER`**. It establishes neither that this second account holds the placeholder token nor that the identical transfer succeeds before freezing. An insufficient-balance rejection can satisfy `assertFalse(moved)` without proving a freeze. The test then performs no frozen claim or unpause-and-claim recovery sequence. [Funding](test/TorchEndToEnd.t.sol:305), [probe and remaining assertions](test/TorchEndToEnd.t.sol:332)
+
+Use the same funded sender and transfer before, during and after freezing, then exercise claim refusal and recovery.
+
+**I11:** all eight swaps execute, but the stated **0.1%** tolerance remains an unexplained substitute for rounding-scale equivalence. On the one-million-token buy, it permits approximately **1,000 quote tokens** of payment disagreement and **9.9 quote tokens** of fee disagreement. That does not establish the plan’s one-wei claim. [Tolerance and comparisons](test/TorchFeeTake.t.sol:287), [promise](docs/plan.md:192)
+
+Derive the rounding bound, accounting for propagation through the other currency, or describe this as a loose regression check. No fee-pricing exploit was established.
+
+The **young-pool witness is distinguishing**: it establishes positive allowance and insufficient history, then requires `OracleTooYoung` by selector. [Witness](test/TorchBuyback.t.sol:371)
+
+**LOW — none reported.**
+
+The remaining acceptance/refusal review found no fresh behavioural defect:
+
+- Factory creation enforces the allocation ceiling, nonzero creator, quote-contract presence and seed feasibility; registration and seeding remain factory-only. Vesting pays only the fixed recipient’s vested balance. [Creation](src/TorchFactory.sol:105), [vesting](src/TorchVesting.sol:70)
+- Fee branches select the quote leg consistently; malformed referrals remove the commission without rejecting the swap, and per-accrual share subtraction conserves the fee. Specified-quote partial fills revert atomically. [Fee branches](src/TorchHook.sol:319), [split](src/TorchHook.sol:946)
+- Opening purchases accumulate against `tx.origin`; sales and post-window buys escape the cap. Documentation identifies the key correctly, but its “contract-per-swap” bypass explanation is inaccurate: changing contracts under one origin does not reset this ledger. [Implementation](src/TorchHook.sol:356), [documentation](docs/plan.md:277)
+- Converter refusal unwinds every earlier hop and claim debit. No additional entitlement stranded behind that refusal was established. Self-buyback retains realised partial-spend accounting and rolls back zero-output presses. No platform two-press transition survives in this tree. [Per-hop refusal](src/TorchConverter.sol:262), [buyback accounting](src/TorchHook.sol:768)
+- Callback authentication, pre-payment claim debits and vault locking supplied the relevant reentrancy arguments; no concrete double-payment path was established. Epoch recording remains recorder-only and partitions credits by quote, payer and day. [Claim debit](src/TorchHook.sol:616), [epoch recording](src/TorchEpochRewards.sol:49)
+
+The accepted known-open families are excluded from the counts. M1 and M2 above are the unresolved round-11 review items.
+
+**EXECUTION-NOTES**
+
+- Initial and final HEAD matched the pin. All **92 tracked review files** checked matched pinned blobs. No files were changed.
+- Boundary checks, census scan and all **98 census row self-tests** passed.
+- All **44 mutation anchors** occur uniquely. Mutation kills were not executed.
+- An integer model checked **10,081 creator/referral balance pairs** for shared-budget bounds, conservation and repeated draining. This was not EVM execution.
+- The combined-settlement census row still names tests that do not exercise simultaneous creator/referral entitlement at the ceiling. [Listed witnesses](docs/site-census.md:241), [conversion test](test/TorchAccounting.t.sol:480)
+- Forge’s normal run failed writing its cache. With caching disabled, Solc completed compilation, then artifact writing failed because the workspace is read-only. Solidity and fork tests did not execute.
+
+VERDICT: HIGH=0 MEDIUM=2 LOW=0

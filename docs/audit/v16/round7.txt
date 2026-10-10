@@ -1,0 +1,17 @@
+AUDITED_TREE=7bdb5fcb2c79217bc365d680d9d65e2354c2add1
+
+STANDS — G1: All three exits move nonzero amounts; omitting any corresponding liability retirement breaks the balance equation. [Witness](test/FeastEmissions.t.sol:346).
+
+STANDS — G2: At the quarter price, both payer valuations floor to zero while their aggregate is one. Rounding accounts upward instead makes their combined claims exceed the trader pot. [Witness](test/FeastEmissions.t.sol:317).
+
+STANDS — G3: The first payment is positive, repetition must pay zero, and subsequent referrals unlock a positive increment. Removing claimed-amount recording fails the repeated-claim assertion. [Witness](test/FeastPackageTwo.t.sol:188).
+
+STANDS — G4: Five tokens reach the sink; both the supply reduction and empty sink balance are asserted. Removing the burn fails both assertions. [Witness](test/FeastPackageTwo.t.sol:510).
+
+I reviewed the `src/` and `script/` delta against `4d008d1`, all added/modified contracts and scripts, lifecycle dependencies, relevant emissions/window/grants/sink/gate/ledger/genesis/deployment tests and fixtures, and mutation/checker code. I also read the supplied brief, tokenomics specification, relevant interface sections, coordinator answers, plan §R–§R4, and v1 invariants/refusal ledger. `forge build --offline` failed with a cache permission error; I did not run tests or mutations.
+
+EXECUTION-NOTES (uncounted): G1–G4 conclusions are from source inspection. I read the operator’s reported passing results; I did not reproduce them. No new finding met the bar under the time, ordering, and lifecycle lens.
+
+scheme-entity findings this round: no — no qualifying original-design defect identified.
+
+VERDICT: PASS

@@ -1,0 +1,48 @@
+AUDITED_TREE=bc0f185075a4b0a8bf7c06bce21f0fe0d1a5a6c8
+
+STANDS — G1: Removing `NotVault` lets the funded probe complete the callback during the exclusive hour; the expected refusal fails for the intended reason. [Witness](test/FeastPackageTwo.t.sol:321).
+
+STANDS — G2: Removing the claim-once guard lets Alice’s second claim consume Bob’s funded half. No insufficient-balance failure masks it. [Witness](test/FeastPackageTwo.t.sol:336).
+
+STANDS — G3: After 200 hours the unclamped price is zero; the test requires price and payment of one. [Witness](test/FeastPackageTwo.t.sol:457).
+
+STANDS — G4: The sale price is `2^42`; its required floor is `2^36`. Without the post-sale floor, the later price is one, so the assertion distinguishes that guard. [Witness](test/FeastPackageTwo.t.sol:471).
+
+I read the `src/` contracts, including the venue interfaces, all five `script/` files, the baseline diff, the relevant accounting, ledger, genesis, emissions, package-two, fill, exit, claim, buyback, isolation and recipe tests and their fixtures; relevant portions of the three checking/mutation tools; both specified documents; coordinator answers; and plan §R–§R4. I did **not** run `forge build`, Solidity tests, or mutations because the filesystem is read-only. The checks above are source-based counterfactuals.
+
+**HIGH: none identified. MEDIUM: none identified.**
+
+**LOW — L1: The conservation witnesses leave outgoing bookkeeping and fractional valuation unchallenged.**
+
+The current implementations appear conservative, but the following regressions are not distinguished by their existing witnesses. These are batched as one coverage finding; mutation survival below is inferred from source, not an executed result.
+
+| Unchallenged obligation | Evidence and missing witness |
+|---|---|
+| Emissions liabilities decrease by every payment, expiry burn and redirect release. | The respective debits are at [claim](src/FeastEmissions.sol:358), [burnExpired](src/FeastEmissions.sol:379), and [releaseRedirect](src/FeastEmissions.sol:391). Removing each independently leaves the tested transfer/burn amounts unchanged. `test_claimsWaitUntilThePlatformCoinsPoolOpens`, `test_anUnclaimedWeekBurnsAfterItsGrace`, and `test_aRedirectTakesAShareOfNewWeeksAndNeverASettledOne` do not reconcile liabilities afterward. The [week-52 test](test/FeastEmissions.t.sol:495) performs no preceding emissions payout and takes `liabilities()` itself as its expected retained balance. |
+| A partner cannot receive an already-paid grant portion again. | Removing [`claimed[partner] += amount`](src/FeastGenesisGrants.sol:113) leaves the first payout correct. [test_aGrantUnlocksByTheFeesItsPartnersLinksBring](test/FeastPackageTwo.t.sol:168) repeats a checkpoint, but never repeats the claim. Add a second claim while other partners’ allocations remain funded, then verify that a later unlock pays only its increment. |
+| Individual priced credits must floor before dividing the pots. | [testFuzz_theClaimsOfAWeekNeverExceedItsPots](test/FeastEmissions.t.sol:172) varies amounts and accounts, but both quote prices are exactly one; the stock mock starts at [sqrt price `2^96`](test/utils/MockV3Pool.sol:16). Changing the three account valuations in [`_priced`](src/FeastEmissions.sol:423) to ceiling rounding therefore changes nothing in this witness. At price `1/4`, two credits of three units have aggregate priced value one: the current individual floors are zero, whereas ceilings give each account the entire pot. This primitive also supplies grant referral values. |
+| Platform coin arriving directly at the sink remains burnable. | [`burnStray`](src/FeastPlatformSink.sol:121) has no invocation in `test/`. `test_aTakeBurnsItsPaymentAndReanchorsByTheShareTaken` covers the separate `take` burn. An empty `burnStray` implementation consequently has no behavioral witness. |
+
+The direct fix is a test-only conservation pass: calculate outstanding obligations independently, reconcile balances after each exit, exercise fractional quote prices, repeat partially unlocked grant claims, and fund/call `burnStray`. Add individual mutations for these obligations. **This fix introduces no new economic violation:** production payout formulas and guards need no change for this finding.
+
+**EXECUTION-NOTES — uncounted**
+
+The principal conservation conclusions and their supporting tests are:
+
+| Value flow | Conclusion and witness assessment |
+|---|---|
+| Genesis supply | Team + emissions + grants + seeded coin + unused seed sent to the burn address equals `1e27`; factory retains zero. [test_theSplitIsSixtyFiveTwentyFifteenToTheUnit](test/FeastGenesis.t.sol:238) directly checks the independent allocation amounts and their sum. Non-vacuous. |
+| Fee ledger | Each track’s total equals its accounts, including coincident roles and skipped saturated tracks. [testFuzz_eachTotalIsExactlyTheSumOfItsAccounts](test/FeastFeeLedger.t.sol:221) and [test_aSaturatedTrackSkipsOnlyItselfAndOnBothSides](test/FeastFeeLedger.t.sol:186) exercise those conditions. Non-vacuous. |
+| Four fee buckets and LP income | Every banked fee is partitioned exactly; creator remainder absorbs split rounding. [testFuzz_everyWeiTakenIsBankedInExactlyOneBucket](test/FeastAccounting.t.sol:209) and [test_theLockedPositionsFeesAreCollectableIntoTheSameBuckets](test/FeastAccounting.t.sol:267) check these sums. Non-vacuous for partition conservation. |
+| Quote payouts and platform exit | Payments retire only the amount delivered; excess entitlement survives bounded settlements. [test_aBoundedReferrerClaimNeverDestroysTheRemainder](test/FeastClaimBound.t.sol:167) and [test_aBucketLargerThanOneSettlementLeavesInPieces](test/FeastPlatformExit.t.sol:144) fund and recover the excess. Non-vacuous. |
+| Internal fill and button | Quote claims spent match bucket debits; acquired coin claims match deferred burns; button output divides into burn plus tip. [test_anExactInputSaleIsPartlyFilledFromTheBucketAtSpot](test/FeastInternalFill.t.sol:101), [test_aPartiallyFilledPressDebitsOnlyWhatItSpent](test/FeastBuyback.t.sol:298), and [test_theTipIsASliceOfWhatWasBoughtAndNoMore](test/FeastBuyback.t.sol:221) observe the relevant amounts. Non-vacuous. |
+| Emissions across genesis and week 52 | Before funding, `remaining + liabilities = budget`. After funding, ordinary exits reduce balance and liabilities equally; settlement moves remaining into liabilities. Expiry retires unclaimed pots, and the final burn retains liabilities. [test_aPreLaunchWeekSettlesUnderTheTokenCapAlone](test/FeastEmissions.t.sol:88) checks initial accounting; [test_aRedirectIsAShareOfWhatTheWeekActuallyEmits](test/FeastEmissions.t.sol:412) checks empty-track allocation. Both are non-vacuous; outgoing reconciliation has L1’s gap. |
+| Grants and team vesting | Grant entitlement is capped, and earned plus unearned portions partition each grant. [test_theUnearnedPartBurnsOnlyAfterTheHorizon](test/FeastPackageTwo.t.sol:202) burns the unearned portion and subsequently claims the earned portion. [test_itVestsLinearlyForThirtySixMonthsFromTheWindowsClose](test/FeastPackageTwo.t.sol:385) checks cumulative team release. Non-vacuous, with repeated grant payment coverage missing as noted. |
+| Launch pot | The specified-leg partial-fill refusal protects whole-pot spending. Claims distribute exactly `bought`; unsuccessful settlement permits full refunds. [test_theWholePotBuysOnceAndEveryoneGetsTheSamePrice](test/FeastPackageTwo.t.sol:267) and [test_anUnsettledWindowRefundsEveryCommitInFull](test/FeastPackageTwo.t.sol:353) exercise both branches. Non-vacuous. The final claimant receives the expressly specified rounding remainder. |
+| Sink takes | Cost rounds upward, delivered assets cannot exceed holdings, and payment burns. [test_aTakeBurnsItsPaymentAndReanchorsByTheShareTaken](test/FeastPackageTwo.t.sol:438), together with G3–G4, distinguishes these behaviors. Stray burning lacks a witness. |
+
+I executed 74,752 read-only integer-model cases supporting the emissions floor inequalities, plus the G3/G4 arithmetic and liability-debit counterexamples. These were **not Solidity executions**. I read the supplied operator results—310 in-process tests, 23 fork tests, checker passes and nine caught mutations—but did not independently reproduce them. Final HEAD and citation locations were checked against the pinned commit; the worktree remained clean.
+
+scheme-entity findings this round: no — the finding concerns conservation witnesses, not the original change design.
+
+VERDICT: HIGH=0 MEDIUM=0 LOW=1

@@ -1,0 +1,36 @@
+[profile.default]
+src = "src"
+test = "test"
+out = "out"
+libs = ["lib"]
+solc = "0.8.26"
+evm_version = "cancun"          # BSC has Cancun opcodes since Pascal; infinity-core is deployed with this target
+via_ir = true
+optimizer = true
+optimizer_runs = 1_000        # EIP-170: v1.6.10's two hook fixes left FeastHook at -83 with 20_000; 1_000 leaves ~2.4 KB for the external audit's own fixes, at +0.9% gas per trade (owner, 2026-09-19)
+bytecode_hash = "none"          # deterministic bytecode: no metadata hash in the deployed code
+cbor_metadata = false
+gas_limit = "300000000"
+# infinity-core's README requires --isolate so that each external call is metered
+# in its own EVM frame; adopting it from day one avoids phantom gas failures.
+isolate = true
+allow_internal_expect_revert = true
+
+[profile.default.fuzz]
+runs = 256
+
+[profile.ci.fuzz]
+runs = 10_000
+
+[profile.ci.invariant]
+runs = 1_000
+fail_on_revert = false
+
+[fmt]
+line_length = 120
+number_underscore = "thousands"
+sort_imports = true
+tab_width = 4
+
+[rpc_endpoints]
+bsc = "${BSC_RPC_URL}"

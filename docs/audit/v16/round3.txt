@@ -1,0 +1,126 @@
+AUDITED_TREE=4a2f99b5fc78956ea3acaa5efcbfd4656fd6ea7c
+
+G1 STANDS — Role and platform-coin identification are enforced at genesis and rechecked at exit, within the ruled trust in the genesis key. [Recipient checks](src/FeastFactory.sol:317)
+
+G2 DEFECTIVE — The custody clamp prevents an oversized take, but a fill can still break an otherwise settleable sale. See M1. [Clamp](src/FeastHook.sol:469)
+
+G3 STANDS — All nine published ABIs match cached artifacts; the checker compares complete ABI entries. Fresh artifact generation was blocked. [ABI check](tools/check-boundaries.py:292)
+
+G4 STANDS — Buy-back emits one `Trade`, payer = hook, fee = zero. [Emission](src/FeastHook.sol:1105)
+
+G5 STANDS — The reentrant-exit witness now requires the nested call to succeed, distinguishing an empty-bucket return from a blocked second payout. [Assertion](test/FeastPlatformExit.t.sol:201)
+
+G6 STANDS — All 88 mutation anchors resolve uniquely, including the four additions. Mutation executions were not rerun. [New mutations](tools/mutate.py:608)
+
+G7 STANDS — The shared fixture constructs a converter; the plan explicitly acknowledges the five older suites retaining a zero converter. [Fixture](test/utils/HookFixture.sol:70), [corrected claim](plans/v16/plan.md:616)
+
+I read the `src` delta against `4d008d1`, all seven added or modified source files, the connected hook base, oracle, token, arithmetic and venue interfaces, relevant venue dependencies, package-1 tests and fixtures, ABI/mutation/census tools, the brief, applicable plan sections and v1 round-13 residue. I attempted both build and tests: build failed writing the cache; the targeted test command completed compilation but failed writing artifacts. **No Solidity tests executed.**
+
+**MEDIUM**
+
+**M1 — The fill removes coin between a router’s `sync` and `settle`, invalidating its payment.**
+
+Caller: an ordinary router inside a vault lock. State: an open pool at price 1, mature matching TWAP, sufficient custody, and allowance for a one-token fill. Arguments: an exact-input sale of 1,000 tokens.
+
+The router performs:
+
+1. `vault.sync(coin)`, recording balance `V`.
+2. Transfers `X = 1,000e18` coin into the vault.
+3. Calls the pool’s swap.
+4. Calls `vault.settle()`, then takes its quote proceeds.
+
+The fill passes the custody check, removes and burns `f = 1e18` coin, and returns a delta making the router owe the full sale input `X`. But the vault now holds `V + X − f`; settlement credits only `X − f`. The router retains a negative coin delta of `f`, so lock completion reverts.
+
+The offending transfer is [inside `_fill`](src/FeastHook.sol:490); the local interface documents settlement as the balance increase since [`sync`](src/venue/IFeastVault.sol:19). Without the fill, this sequence settles exactly. This breaks P10 and I1 at ordinary amounts, without a hostile token or insufficient custody.
+
+The existing router always syncs **after** swapping, and the flash-sale witness also syncs after its swap; neither exercises this interval. [Standard router](test/utils/PoolRouter.sol:61), [custody witness](test/FeastInternalFill.t.sol:219)
+
+**Fix and second-order check:** Before effects, decline the optional fill when the vault’s currently synced currency is this coin. The underlying vault exposes that state through `getVaultReserve`. Preserve the router’s snapshot; resetting it would discard its prepayment. Returning no fill preserves the original sale and introduces no new refusal or bucket movement.
+
+**LOW**
+
+**L1 — Negating the minimum signed input rejects a valid, bounded partial sale—even with no burn bucket.**
+
+An exact-input seller can supply `amountSpecified = type(int256).min` and a price limit that bounds actual consumption. The venue handles that negative magnitude in unchecked arithmetic and narrows the **realised** deltas.
+
+Package 1 instead evaluates checked unary negation before entering `_fill`, so it panics before the empty-bucket or other no-fill checks. [New argument conversion](src/FeastHook.sol:404)
+
+A concrete bounded construction is coin as currency0, liquidity `1e20`, starting square-root price `2^96`, and limit `floor(0.999 × 2^96)`. Integer reconstruction using the configured LP fee gives approximately `1.0011e17` coin spent and `9.9e16` quote received after the hook fee—both comfortably within signed 128-bit settlement. The enormous request does not require an enormous realised trade.
+
+The admission fuzz takes only `uint96` input and bounds it further, so it cannot reach this failure. [Fuzz domain](test/FeastInternalFill.t.sol:337)
+
+**Fix and second-order check:** Return no fill for this unsupported magnitude before negation, leaving the original request and venue price limit intact. That restores the otherwise valid sale without changing fee accounting or settlement caps.
+
+**L2 — Intermediate rounding can pay less than both rounded spot and the unfilled sale.**
+
+`_quoteForCoin` floors after each square-root multiplication. That differs from rounding the final spot-price product down. [Calculation](src/FeastHook.sol:529)
+
+Concrete construction: coin is currency0; `sqrtPriceX96 = 3 × 2^95`; active liquidity is `1e20`; the oracle agrees; custody and allowance permit a fill; the trader sells **two raw coin units**.
+
+- The hook fills one unit and pays `floor(floor(1 × 1.5) × 1.5) = 1` quote unit.
+- Correct rounded spot is `floor(1 × 2.25) = 2`.
+- The remaining one-unit pool input is entirely consumed by LP-fee rounding.
+- Without the fill, the two-unit input yields two quote units under the venue’s integer arithmetic.
+
+The fill therefore reduces proceeds from two units to one. A router requiring the otherwise achievable two-unit minimum reverts. This contradicts the plan’s spot-payment promise and the census’s “never less than the curve” claim. [Plan](plans/v16/plan.md:85), [census](docs/site-census.md:198)
+
+The pricing witness copies the same double-floor expression, so its equality assertion cannot detect this discrepancy. [Copied calculation](test/FeastInternalFill.t.sol:65)
+
+**Root-cause scope:** The inverse helper and converter use the same arithmetic pattern. This finding counts the new use as an actual seller payment; it does not recount the converter’s pre-existing execution-bound residue. [Inverse](src/FeastHook.sol:540), [converter](src/FeastConverter.sol:280)
+
+**Fix and second-order check:** Preserve precision until final rounding and test against an independent rational-price calculation in both currency orderings. Simply squaring `sqrtPriceX96` in `uint256` introduces overflow at valid high prices; retain overflow-safe arithmetic and recheck allowance/custody bounds after conversion.
+
+**L3 — The “never touches the quote token” witness does not test that property.**
+
+`test_aFillNeverTouchesTheQuoteToken` uses an ordinary transferable quote, asserts a fill occurred, and checks only that the hook’s final quote balance is zero. It neither freezes the quote nor observes calls to it. A withdrawal and redeposit during the fill could preserve that final balance while introducing a token-controlled swap refusal. [Entire witness](test/FeastInternalFill.t.sol:345)
+
+**Fix and second-order check:** Exercise an actual fill against a frozen quote, with the router receiving quote claims so its own payout does not require a token transfer. Require successful settlement and a nonzero `InternalFill`. This is a test correction; it introduces no production behavior change.
+
+**Acceptance and refusal coverage**
+
+| Package-1 change | ACCEPT | REFUSE / excluded construction |
+|---|---|---|
+| Weekly ledger | Only the immutable recorder; each nonzero role receives the whole fee on every track with headroom; coinciding roles coalesce correctly. | Foreign writers revert. Zero, oversized and overflowing track credits are skipped on both account and total, preventing cross-field carry and denominator mismatch. [Implementation](src/FeastFeeLedger.sol:111) |
+| Gate | Factory registration with `(0,0)`, or nonzero opener and `now < openAt ≤ now + 14 days`; opener swaps before opening; everyone afterwards. | Invalid gate pairs/times; non-opener swaps on all four branches; all buy-backs while gated. This closes the callback-skipping route. [Swap gate](src/FeastHook.sol:390) |
+| Referral | Canonical 32-byte addresses other than `tx.origin`; creator/referrer coincidence and zero commission remain valid. | Wrong-length data, noncanonical address words, zero and self-referral receive no referral benefit; the swap continues. |
+| Platform exit | Any caller, fixed genesis sink reporting the correct role and coin; bounded payment in the accrued asset; empty bound bucket is a no-op. | Unbound, code-less or incorrectly identifying sinks; token-transfer failures revert atomically. No caller-selected route or recipient. [Exit](src/FeastHook.sol:997) |
+| Genesis | Genesis key once; identifying recipients; a nonzero future sink may lack code; fixed supply and terms; shared seed path. | Foreign/repeated calls, missing or wrong recipient identification, zero sink, invalid gate and invalid seed. Allocations are exact; the pool’s 65% includes the permitted seed remainder disposal. [Routing](src/FeastFactory.sol:246) |
+| Internal fill | Exact-input sales on open pools, nonzero allowance, usable TWAP within 300 ticks, positive rounded amounts, custody and individual settlement caps; shared allowance debited by quote paid. | Other branches, gated/young/deviating pools and unavailable amounts decline the fill. M1/L1 identify unintended trade refusals; L2 identifies underpayment. [Admission](src/FeastHook.sol:451) |
+| `Trade` | One event for each successful ungated swap, including filled sales and buy-backs. Specified-quote branches subtract their before-swap fee; unspecified-quote branches incorporate fill and after-swap fee; buy-backs report gross acquired coin, hook payer and zero fee. | Gated swaps emit none; reverted transactions retain none; LP collection has no emission site. [Trader delta adjustment](src/FeastHook.sol:600), [emission guard](src/FeastHook.sol:1348) |
+| Metadata | Any `bytes32`, including explicit zero, stored and emitted by ordinary creation and genesis. | No digest-content validation is intended; failed creation rolls back both storage and announcement. [Ordinary creation](src/FeastFactory.sol:207), [genesis announcement](src/FeastFactory.sol:297) |
+
+For G1 specifically, a selector-aware fallback can return the expected role and coin and pass without implementing spendability. That remains the genesis key’s ruled responsibility. Malformed successful return data can escape Solidity’s `try/catch` during caller-side ABI decoding, but the result here is still atomic refusal of genesis or exit, with no payout—not an honest-swap failure. [Exit identification](src/FeastHook.sol:1015)
+
+**P1–P12 witness assessment**
+
+“Yes” below means the inspected assertions distinguish the stated regression; it does not mean the test executed here.
+
+| Invariant | Named witness and whether it can fail for the stated reason |
+|---|---|
+| P1 | [`testFuzz_eachTotalIsExactlyTheSumOfItsAccounts`](test/FeastFeeLedger.t.sol:221): **yes**, compares independent account sums with all three totals after role-collision sequences. |
+| P2 | [`test_aTrackWithNoHeadroomSkipsBothSidesAndTheSwapStillRecords`](test/FeastFeeLedger.t.sol:165), `test_aFeeLargerThanATrackIsIgnoredNotReverted`: **yes** for ledger overflow/refusal; these call the ledger directly rather than exercising every oversized fee through a swap. |
+| P3 | [`test_eachBranchCreditsTheWholeFeeToPayerCreatorAndReferrer`](test/FeastAttribution.t.sol:38), role-collision, week-boundary, quote-isolation and burn-creator tests: **yes** for their respective attribution changes. |
+| P4 | [`test_aSelfReferralIsNoReferralOnAnyBranch`](test/FeastAttribution.t.sol:68) and its fuzz counterpart: **yes**, check both commissions and referral credits across branches. |
+| P5 | [`test_beforeOpenAtAStrangerCannotTradeOnAnyBranch`](test/FeastGate.t.sol:40), `test_theOpenerTradesBeforeOpenAtOnEveryBranch`, `test_atOpenAtEveryoneTrades`: **yes**, distinguish exclusion, honest admission and boundary timing. |
+| P6 | [`test_theGateBoundIsFourteenDaysLiterally`](test/FeastGate.t.sol:164), invalid-pair tests and `test_theOpenersTradeIsChargedButRecordedNowhere`: **yes**. Gated ledger suppression is directly witnessed on a buy branch. |
+| P7 | [`test_anyoneMovesExactlyThePlatformShareToTheSink`](test/FeastPlatformExit.t.sol:92), other-bucket, oversized-payment, freeze/retry and reentrancy tests: **yes**, with explicit delivered-value and retained-remainder assertions. |
+| P8 | [`test_itRunsOnceAndThenNothingIsPrivileged`](test/FeastGenesis.t.sol:54) plus [`test_afterGenesisTheGenesisKeyHoldsNoPower`](test/FeastAuthority.t.sol:75): **yes** for the enumerated authority surface. |
+| P9 | [`test_theSplitIsSixtyFiveTwentyFifteenToTheUnit`](test/FeastGenesis.t.sol:238): **yes**, independently checks recipient balances, empty factory and seed-plus-disposal conservation. |
+| P10 | [`test_theFeeOnAFilledSaleIsOnePercentOfTheWholeSale`](test/FeastInternalFill.t.sol:128), shared-allowance and hourly-sequence tests: **yes** for those accounting regressions. **No** for complete admission, independent spot precision or frozen-quote independence: M1 and L1–L3 describe the gaps. |
+| P11 | [`test_eachBranchEmitsOneTradeWithTheTradersOwnAmounts`](test/FeastTradeEvent.t.sol:65), filled-sale and buy-back witnesses: **yes** for sampled amounts, payer, price and ordinary/buy-back counts. The filled-sale witness does not itself assert uniqueness; the ordinary branch samples use nonzero fees. |
+| P12 | [`test_theMetadataHashIsStoredAndAnnounced`](test/FeastFactory.t.sol:111): **yes** for ordinary storage and event contents/presence. [`test_thePlatformCoinsMetadataHashIsRecorded`](test/FeastGenesis.t.sol:191): **storage only**; it would not detect a missing or incorrect genesis metadata announcement. |
+
+M1 and L1 weaken I1; L2 breaks the new execution-price guarantee. I found no additional package-1 weakening of I2–I15: ledger totals, bucket conservation, authority, principal locking, isolation, fixed supply, oracle age and claimant route choice remain structurally intact. B1–B6 and the accepted census-enumeration gaps are not recounted.
+
+**EXECUTION-NOTES — uncounted**
+
+- Initial and final HEAD matched the pin; reviewed tracked paths matched that commit.
+- Census checks passed. All 88 mutation anchors were present exactly once.
+- Nine published ABIs matched cached artifacts; this is not a fresh-build parity result.
+- Build and targeted tests were attempted but blocked by filesystem writes. No Solidity, fork or mutation tests executed.
+- The numerical constructions above are integer reconstructions, not executed EVM reproductions.
+- No files were changed. All 83 prepared citation locations were checked against the pinned commit.
+
+scheme-entity findings this round: yes — the original internal-fill design introduces settlement interference and numeric admission/pricing defects.
+
+VERDICT: HIGH=0 MEDIUM=1 LOW=3

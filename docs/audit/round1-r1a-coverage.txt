@@ -1,0 +1,98 @@
+AUDITED_TREE=a4df8f189afac71426f1cf5abe8e9e41b2258972
+
+**HIGH**
+
+**H1 — `platformBuyBack` accepts a substitute platform coin, allowing fabricated rewards to drain genuine pots.** The destination check verifies only that the supplied pool’s quote is wrapped native. It never checks its coin against `epochRewards.platformToken()`. The hook transfers the purchased coin to rewards and credits its numerical amount; claims subsequently transfer the immutable, genuine platform token. Evidence: [src/TorchHook.sol:769](src/TorchHook.sol:769), [src/TorchHook.sol:797](src/TorchHook.sol:797), [src/TorchEpochRewards.sol:156](src/TorchEpochRewards.sol:156).
+
+Construction: an attacker creates a cheap, large-supply Torch coin paired with wrapped native and establishes sufficient oracle history. They supply that pool as `platformKey`, using a source quote for which they are the current epoch’s sole fee payer. The purchase deposits cheap coins but credits a pot denominated numerically as genuine platform tokens. After the epoch closes, their claim spends genuine tokens backing other pots. The attacker can size the fabricated entitlement below the available genuine balance so the transfer succeeds.
+
+**H2 — Governance accepts proposals that remove the voting and timelock restrictions.** `TorchGovernor` inherits mutable governance settings and forwards arbitrary targets and calldata without restricting them to `setBurnShareBps`. Evidence: [src/governance/TorchGovernor.sol:28](src/governance/TorchGovernor.sol:28), [src/governance/TorchGovernor.sol:79](src/governance/TorchGovernor.sol:79).
+
+Construction: a coalition meeting the initial threshold and quorum passes a batch calling the timelock’s `grantRole(PROPOSER_ROLE, attacker)` and `updateDelay(0)`. This works even after the deployer renounces administration: the timelock grants itself the admin role, and self-calls may change its delay. The attacker can thereafter schedule and execute burn-share changes without another vote or three-day wait. Evidence: [lib/openzeppelin-contracts/contracts/governance/TimelockController.sol:117](lib/openzeppelin-contracts/contracts/governance/TimelockController.sol:117), [lib/openzeppelin-contracts/contracts/governance/TimelockController.sol:447](lib/openzeppelin-contracts/contracts/governance/TimelockController.sol:447). The callee’s band and next-epoch checks survive, but the promised authority restriction does not.
+
+**H3 — The hook/oracle combination assigns prices to the wrong time intervals.** The hook writes the **pre-swap** tick. The oracle then treats that tick as prevailing until the next write, including extrapolation through idle periods. Evidence: [src/TorchHook.sol:303](src/TorchHook.sol:303), [src/TorchOracle.sol:74](src/TorchOracle.sol:74), [src/TorchOracle.sol:128](src/TorchOracle.sol:128).
+
+Construction, with coin as currency0: at time `t`, buy from tick 0 to 2000; the recorded tick is 0. At `t+1`, sell back to tick 0; the recorded tick becomes 2000. Leave the pool at tick 0 for 600 seconds. At `t+601`, buy back to tick 2000 and press the button. The new observation records 0, but its cumulative already assigns the preceding 600 seconds to tick 2000. The button therefore accepts spot 2000 against average 2000, although the actual preceding window was at tick 0. Conversely, an ordinary trade followed by inactivity can leave a stable, honest price more than 300 ticks from the incorrectly retained average and block buybacks.
+
+**H4 — Permissionless conversion accepts routes that consume a claimant’s money through repeated fees.** `claimAsBnb` lets anyone select the route for another account. The converter permits repeated tokens and pools, validates every hop before execution, and checks only that final output is nonzero. There is no bound on total output relative to input. Evidence: [src/TorchHook.sol:636](src/TorchHook.sol:636), [src/TorchConverter.sol:101](src/TorchConverter.sol:101), [src/TorchConverter.sol:117](src/TorchConverter.sol:117).
+
+Construction: give a victim an accrued quote claim and choose a mature, sufficiently deep quote/wrapped-native v3 pool charging 1%. An attacker calls `claimAsBnb` with 51 alternating hops through that pool, ending in wrapped native. All initial spot/TWAP checks pass; sufficiently deep liquidity keeps every swap inside its limit. Ignoring negligible price impact, only `0.99^51 ≈ 59.90%` survives. The victim’s entire claim is consumed. An attacker providing the liquidity can capture the LP portion of these unnecessary fees.
+
+The individual price limit also exceeds the advertised price tolerance: multiplying the square-root price by `1.03` permits a `1.0609` terminal price ratio, on top of the allowed initial spot deviation. Evidence: [src/TorchConverter.sol:169](src/TorchConverter.sol:169).
+
+**H5 — The two specified-quote fee branches charge unfilled amounts.** Both `beforeSwap` branches calculate the fee from the requested amount and accrue it immediately. `afterSwap` skips those cases, so partial fills never reconcile the fee. Evidence: [src/TorchHook.sol:324](src/TorchHook.sol:324), [src/TorchHook.sol:343](src/TorchHook.sol:343), [src/TorchHook.sol:376](src/TorchHook.sol:376).
+
+Construction: outside the opening window, submit an exact-input buy for 10,100 quote units with a price limit that allows approximately 100 units into the pool. The hook takes 100 units in fees, although 1% of the executed quote leg is approximately one unit. The venue expressly stops at the price limit with input remaining. Evidence: [lib/infinity-core/src/pool-cl/libraries/CLPool.sol:256](lib/infinity-core/src/pool-cl/libraries/CLPool.sol:256). Exact-output sales have the corresponding problem: the precharged fee can exceed the quote actually received, turning a sale into an additional quote debt. The unspecified-quote branches use actual deltas, so branch equivalence fails.
+
+**H6 — Partial button fills consume accounting entitlement while leaving the unspent assets unreachable.** Self-buyback increments `selfBurnUsed` by the requested input, but settlement burns claims only for the actual quote delta. Only output is returned to the caller. Evidence: [src/TorchHook.sol:726](src/TorchHook.sol:726), [src/TorchHook.sol:516](src/TorchHook.sol:516).
+
+Construction: establish mature history, a pending bucket of 100 quote units, and liquidity allowing only one unit to execute before the price limit. A permissionless request for 20 passes the size check. Settlement spends one, but pending decreases by 20; the other 19 remain in vault claims without a corresponding spendable bucket.
+
+The same missing reconciliation affects conversion and platform purchases. `convert` transfers the full input, forwards only each hop’s output, and never refunds unspent input. The platform purchase likewise leaves unused wrapped native in the hook after debiting the source bucket. Evidence: [src/TorchConverter.sol:108](src/TorchConverter.sol:108), [src/TorchConverter.sol:173](src/TorchConverter.sol:173), [src/TorchHook.sol:556](src/TorchHook.sol:556).
+
+**H7 — Delayed conversions award historical fees to a different epoch’s payers.** Fee credits use the trading epoch, while pot credits use the conversion epoch. The accumulated platform bucket retains no earning-epoch allocation. Evidence: [src/TorchEpochRewards.sol:117](src/TorchEpochRewards.sol:117), [src/TorchEpochRewards.sol:128](src/TorchEpochRewards.sol:128), [src/TorchHook.sol:775](src/TorchHook.sol:775).
+
+Construction: Alice generates substantial fees in epoch E; those platform fees remain unconverted. In E+1, an attacker pays one small nonzero fee and is that quote token’s only payer. They convert the old bucket during E+1. After closure, their `paid / total` is one, so they receive the entire resulting pot despite having funded almost none of it. Alice cannot claim it through E. This defeats the asserted wash-trading loss bound. If conversion occurs in an epoch that closes with no payers, its pot instead becomes permanently unclaimable.
+
+**H8 — `platformBuyBack` omits the minimum interval, defeating the aggregate size restriction.** It checks 20% of current pending and updates `platformUsed`, but never checks or records a last-press time. Neither does the converter. Evidence: [src/TorchHook.sol:758](src/TorchHook.sol:758), [src/TorchHook.sol:775](src/TorchHook.sol:775), [src/TorchConverter.sol:92](src/TorchConverter.sol:92).
+
+Construction: with sufficiently deep, priceable conversion and platform pools, any caller repeatedly presses for 20% of the remaining bucket in one transaction. Twenty-one calls spend over 99% of the starting balance, all within the supposed one-hour interval. Every call may collect its output tip. R6 therefore does not exclude its stated adversary, and R7 does not prevent substantially the whole accrual being processed together.
+
+**H9 — A zero-output self-buyback consumes the cooldown and blocks productive presses.** A nonzero input is required, but nonzero output is not. The timestamp and used balance are committed before output is examined. Evidence: [src/TorchHook.sol:704](src/TorchHook.sol:704), [src/TorchHook.sol:726](src/TorchHook.sol:726), [src/TorchHook.sol:735](src/TorchHook.sol:735).
+
+Construction: on a mature, eligible pool, front-run a productive press with `amountIn = 1` raw quote unit. With positive active liquidity, the venue’s fee rounding can consume that unit entirely as LP fee and return zero coin. Its exact-input arithmetic supports this construction. Evidence: [lib/infinity-core/src/pool-cl/libraries/SwapMath.sol:63](lib/infinity-core/src/pool-cl/libraries/SwapMath.sol:63). The hook succeeds, burns nothing, and blocks the honest press for an hour. Repeating at each expiry suppresses productive buybacks; the attacker pays their own transaction gas.
+
+**H10 — Derived creator entitlement can decrease after payment, breaking conservation and claims.** Creator entitlement subtracts independently rounded cumulative shares; `creatorPending` then subtracts the amount already paid. Evidence: [src/TorchHook.sol:249](src/TorchHook.sol:249), [src/TorchHook.sol:198](src/TorchHook.sol:198), [src/TorchHook.sol:587](src/TorchHook.sol:587).
+
+Construction: use `selfBurnBps=2000`, `referrerBps=0`. Accrue four raw quote units; self-burn and platform each round to zero, so anyone can claim four for the creator. Accrue one more unit. Self-burn and platform now each equal one, while cumulative creator entitlement falls to three. `creatorPending` computes `3 − 4` and reverts. Paid creator funds plus outstanding other buckets equal six against only five collected. Single-state share-sum assertions miss this interleaved accrual/claim sequence.
+
+**MEDIUM**
+
+**M1 — Factory deployment addresses do not bind the caller or economic configuration.** Any caller can reuse another pending launch’s name, symbol, supply and salt while replacing its creator, quote or shares. These replacements do not change the CREATE2 address. Evidence: [src/TorchFactory.sol:104](src/TorchFactory.sol:104), [src/TorchFactory.sol:113](src/TorchFactory.sol:113), [src/TorchFactory.sol:175](src/TorchFactory.sol:175).
+
+Construction: front-run an announced creation with identical constructor inputs and salt but the attacker as creator. Seeding requires no supplied quote, so the attacker can complete that launch. The intended transaction subsequently fails CREATE2, while the predicted address now carries the attacker’s economic configuration.
+
+**M2 — The cardinality predicate refuses valid constant-price history.** A cardinality-one v3 pool whose last observation precedes the entire requested window can provide a valid TWAP when its price remained constant. Equality between spot and TWAP does not establish missing history. Nevertheless, the converter rejects it unconditionally. Evidence: [src/TorchConverter.sol:153](src/TorchConverter.sol:153). The repository’s fork test itself reads a successful 600-second observation and documents the lone observation as roughly fifty minutes old before asserting refusal: [test/TorchConverter.t.sol:105](test/TorchConverter.t.sol:105), [test/TorchConverter.t.sol:111](test/TorchConverter.t.sol:111). This over-refuses R9’s “enough history” case.
+
+**M3 — Locked-position LP fees have no collection path.** The plan promises permissionless collection into the buckets: [docs/plan.md:23](docs/plan.md:23). The hook’s sole liquidity-modification call is the factory-only, once-only seed action. Evidence: [src/TorchHook.sol:430](src/TorchHook.sol:430), [src/TorchHook.sol:458](src/TorchHook.sol:458). After ordinary swaps generate LP fees, no caller can perform the promised zero-liquidity-delta collection. Permanently locking principal has also made the position’s fees unreachable.
+
+**M4 — `TorchConverter.convert` lacks the specified tip, size ceiling and interval.** These are explicitly claimed as converter features in [docs/plan.md:294](docs/plan.md:294). The implementation accepts the caller-approved input without either bound and transfers all output to `recipient`; it pays no caller tip. Evidence: [src/TorchConverter.sol:92](src/TorchConverter.sol:92), [src/TorchConverter.sol:108](src/TorchConverter.sol:108), [src/TorchConverter.sol:117](src/TorchConverter.sol:117). A successful conversion for a different recipient provides a direct counterexample to the promised tip.
+
+**M5 — Already-wrapped-native proceeds require an unnecessary conversion route.** Both conversion callers invoke the converter even when the quote already equals wrapped native. Empty routes revert, and a one-hop wrapped-native-to-itself route has no pool. Evidence: [src/TorchHook.sol:645](src/TorchHook.sol:645), [src/TorchHook.sol:790](src/TorchHook.sol:790), [src/TorchConverter.sol:96](src/TorchConverter.sol:96).
+
+Construction: accrue the platform bucket in the required platform-coin/wrapped-native pool. Despite already possessing the required purchase currency, its platform buyback needs an unrelated round-trip route with usable v3 history. Without that route it cannot proceed; with it, it incurs avoidable fees and price exposure.
+
+**EXECUTION-NOTES — uncounted**
+
+The refusal-ledger disposition is:
+
+| Row | Result |
+|---|---|
+| R1 | Factory-only initialization and pool-manager callback checks hold. |
+| R2 | Both individual share bands hold, including both specified endpoint combinations. Payment sequencing fails separately under H10. |
+| R3 | Incorrect-length and dirty-upper-bit referral data suppress referral credit without reverting the swap. |
+| R4 | Computed-zero fees are skipped. Nonzero partial-fill fees are wrong under H5. |
+| R5 | Positive coin deltas accumulate per `tx.origin` before `capEndBlock`; sales and purchases after the window bypass the cap. |
+| R6 | Present for self-buyback; absent from platform buyback and converter. H8, H9, M4. |
+| R7 | Each hook press has a proportional ceiling; repeated platform presses bypass its aggregate purpose. Converter has none. H8, M4. |
+| R8 | Tick checks and spot-derived limits do not supply the claimed output protection. H3–H6. |
+| R9 | Young-history checks exist; oracle integration and cardinality over-refusal fail. H3, M2. |
+| R10 | Fee accounting is internal to the hook rather than a separate locker. Foreign callers cannot directly accrue; the trusted pot-credit path can be induced to miscredit under H1. |
+| R11 | Factory creates allocations; anyone may claim the linearly vested amount for the fixed recipient. Zero duration releases immediately. |
+| R12 | Claim flag is checked and written before transfer. |
+| R13 | Open/future epochs are refused; closed epochs have no expiry. Funding attribution fails separately under H7. |
+| R14 | The callee enforces `[3000,7000]`. |
+| R15 | Direct caller check holds; H2 bypasses the promised vote/delay through the authorized timelock. |
+| R16 | Changes remain deferred to the next epoch, including successive scheduling calls. |
+| R17 | Negative quote debt during seeding reverts; wholly coin-side positions do not incur that refusal. |
+
+Additional coverage conclusions:
+
+- **Rounding:** fully filled fee branches select the quote correctly for either ordering and generally favor the trader on truncation. Referral rounding favors the creator; tip rounding favors the remaining output; burn-split rounding favors the pot; claim rounding leaves dust in the pot. H5 and H10 are separate failures beyond those ordinary remainders.
+- **Access control and reentrancy:** token supply has no post-construction mint path; vesting claims pay fixed recipients; callback and recorder checks are present. The venue’s self-swap callback exclusion supports the documented hook boundary: [lib/infinity-core/src/libraries/Hooks.sol:71](lib/infinity-core/src/libraries/Hooks.sol:71). No finding assumes that excluded callback occurs.
+- **Frozen or screening quote tokens:** failed payout/conversion transfers revert their accounting updates. Self-buyback settles quote using vault claims and does not transfer that quote token. Oracle and accounting defects above still apply.
+- **Clock and cap documentation:** voting uses the timestamp clock, including the inherited governor clock. The cap really uses `tx.origin`; fresh intermediary contracts under the same origin do **not** bypass it, contrary to the “contract-per-swap” explanation in [docs/plan.md:277](docs/plan.md:277). The documented identity limitation itself is not counted as a finding.
+
+HEAD matched the pin before source inspection and at completion. Reviewed source, tests, documentation and relevant vendored dependencies matched the pinned tree. All cited locations were checked against that commit. Read-only arithmetic checks reproduced the numerical counterexamples; the pinned checker’s licence and authority routines passed. Forge, fork tests and mutation tests were not run because this session permits no filesystem writes. No files were changed.
+
+VERDICT: HIGH=10 MEDIUM=5 LOW=0

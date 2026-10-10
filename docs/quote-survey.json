@@ -1,0 +1,555 @@
+{
+  "block": 120721477,
+  "report": {
+    "QQQB": {
+      "found": true,
+      "tokens": [
+        {
+          "address": "0x205812CdBed920aFf76C6580abD681a46D11efc7",
+          "symbol": "QQQB",
+          "decimals": 18,
+          "totalSupply": 65699783457220000000000,
+          "venues": [
+            {
+              "pool": "0xe531fcb1f5a195de7608b9f4f9518544c2cdb693",
+              "fee": 100,
+              "liquidity": 4624886148147916338452034,
+              "tick": 65792,
+              "observationCardinality": 2000,
+              "priceable": true,
+              "base": "USDT",
+              "kind": "v3"
+            },
+            {
+              "pool": "0x7c84f9943ec82cf2233c97a7ee417f18bd2ec295",
+              "fee": 500,
+              "liquidity": 25050910526527974492892,
+              "tick": 65792,
+              "observationCardinality": 150,
+              "priceable": true,
+              "base": "USDT",
+              "kind": "v3"
+            },
+            {
+              "pair": "0x702c833a01844fdb14ffa6744c6e2dcf58f42b8d",
+              "reserve0": 11060808712120368555,
+              "reserve1": 7955311992626388427999,
+              "priceable": false,
+              "base": "USDT",
+              "kind": "v2"
+            },
+            {
+              "pool": "0x3ae5c7f50c1a6bf1871bc40fa8d8403584d70770",
+              "fee": 100,
+              "liquidity": 3753997562926999943,
+              "tick": 65784,
+              "observationCardinality": 1,
+              "priceable": false,
+              "base": "USDC",
+              "kind": "v3"
+            },
+            {
+              "pool": "0x47bc06722295ac316a569eef87ac32faa455f441",
+              "fee": 500,
+              "liquidity": 5902772988131590439395,
+              "tick": -495,
+              "observationCardinality": 150,
+              "priceable": true,
+              "base": "WBNB",
+              "kind": "v3"
+            },
+            {
+              "pair": "0x0f494581240974b082075af27e087e92612f90dd",
+              "reserve0": 52349252272911770402,
+              "reserve1": 49799265280718793505,
+              "priceable": false,
+              "base": "WBNB",
+              "kind": "v2"
+            }
+          ]
+        },
+        {
+          "address": "0x298DAF496452Fd8a58C256e27a918Ba74dC07777",
+          "symbol": "QQQB",
+          "decimals": 18,
+          "totalSupply": 1000000000000000000000000000,
+          "venues": []
+        },
+        {
+          "address": "0x4382c171cD44c317748D5D8b6e4889912Ea0FfFf",
+          "symbol": "QQQB",
+          "decimals": 18,
+          "totalSupply": 1000000000000000000000000000,
+          "venues": []
+        },
+        {
+          "address": "0xe75Ba9ddadc6b17dE55FB6528d0cC33E309AFfFf",
+          "symbol": "QQQB",
+          "decimals": 18,
+          "totalSupply": 1000000000000000000000000000,
+          "venues": []
+        }
+      ]
+    },
+    "SPCXB": {
+      "found": true,
+      "tokens": [
+        {
+          "address": "0xbe9D156892E55e7154BcD3cB0FEA677F9D3103E1",
+          "symbol": "SPCXB",
+          "decimals": 18,
+          "totalSupply": 432046173518460000000000,
+          "venues": [
+            {
+              "pool": "0x626301d37c135a6f368adc6a12fe1462b14ef03a",
+              "fee": 500,
+              "liquidity": 37859239168618819933348,
+              "tick": -50383,
+              "observationCardinality": 2000,
+              "priceable": true,
+              "base": "USDT",
+              "kind": "v3"
+            },
+            {
+              "pool": "0x977daffc095b33872e2741c19568925015c35b4d",
+              "fee": 2500,
+              "liquidity": 551278635752102321140581,
+              "tick": -50400,
+              "observationCardinality": 400,
+              "priceable": true,
+              "base": "USDT",
+              "kind": "v3"
+            },
+            {
+              "pool": "0x8bd2ac21ce8297628c26d36188866e805684dce4",
+              "fee": 10000,
+              "liquidity": 29551636348734976549,
+              "tick": -50316,
+              "observationCardinality": 1,
+              "priceable": false,
+              "base": "USDT",
+              "kind": "v3"
+            },
+            {
+              "pair": "0xbac381f9ec0033ba34cf010e7c485ab3382390ca",
+              "reserve0": 593189766554042521,
+              "reserve1": 3852700990890482,
+              "priceable": false,
+              "base": "USDT",
+              "kind": "v2"
+            },
+            {
+              "pool": "0x3fcbbdb9c1f63d5382dcf9ad2c680081604dd9f9",
+              "fee": 2500,
+              "liquidity": 2692009527903606599485,
+              "tick": -50383,
+              "observationCardinality": 1,
+              "priceable": false,
+              "base": "USDC",
+              "kind": "v3"
+            },
+            {
+              "pool": "0x366bb6c67fab6eb056c307c51ea2338180bffcb7",
+              "fee": 10000,
+              "liquidity": 33386676103539551347084,
+              "tick": -50313,
+              "observationCardinality": 1,
+              "priceable": false,
+              "base": "USDC",
+              "kind": "v3"
+            },
+            {
+              "pool": "0x8e83f6872eb648a9b582b1dc7109284bc0dfdaf0",
+              "fee": 500,
+              "liquidity": 8804885831773674621,
+              "tick": 15907,
+              "observationCardinality": 1,
+              "priceable": false,
+              "base": "WBNB",
+              "kind": "v3"
+            },
+            {
+              "pool": "0x66faad27cf481f82d0089ec8156b3aa3636010c7",
+              "fee": 2500,
+              "liquidity": 66399854730575706416666,
+              "tick": 15900,
+              "observationCardinality": 600,
+              "priceable": true,
+              "base": "WBNB",
+              "kind": "v3"
+            },
+            {
+              "pool": "0xe45a69dd9ce3485fd770eed66cd9eeb91789776a",
+              "fee": 10000,
+              "liquidity": 26231710734949720,
+              "tick": 13799,
+              "observationCardinality": 1,
+              "priceable": false,
+              "base": "WBNB",
+              "kind": "v3"
+            },
+            {
+              "pair": "0x7b07ef0c9fc2198de1d20b2828845862179ccf6f",
+              "reserve0": 16093615461794008545,
+              "reserve1": 78787811903110412425,
+              "priceable": false,
+              "base": "WBNB",
+              "kind": "v2"
+            }
+          ]
+        },
+        {
+          "address": "0x136ed2C1909611D2d91D150FA9001A484081FfFF",
+          "symbol": "SPCXB",
+          "decimals": 18,
+          "totalSupply": 1000000000000000000000000000,
+          "venues": []
+        }
+      ]
+    },
+    "NVDAB": {
+      "found": true,
+      "tokens": [
+        {
+          "address": "0x02Fca66C1D1aFB4E2A7884261eB00F63598a7436",
+          "symbol": "NVDAB",
+          "decimals": 18,
+          "totalSupply": 72171527438760000000000,
+          "venues": [
+            {
+              "pool": "0xcc2bffaec373a6004bb6ccc8a62cdd66061f7c6a",
+              "fee": 500,
+              "liquidity": 36549774082915011084505,
+              "tick": 54213,
+              "observationCardinality": 1,
+              "priceable": false,
+              "base": "USDT",
+              "kind": "v3"
+            },
+            {
+              "pool": "0x8fb4243b553ac29ba088acf00b9b7da24bd6690c",
+              "fee": 2500,
+              "liquidity": 2127753955466273302819179,
+              "tick": 54226,
+              "observationCardinality": 2000,
+              "priceable": true,
+              "base": "USDT",
+              "kind": "v3"
+            },
+            {
+              "pool": "0x18d52270d09ab842c87acd45977dcf64a82fa4ad",
+              "fee": 10000,
+              "liquidity": 401934427276573649301583,
+              "tick": 54301,
+              "observationCardinality": 64,
+              "priceable": true,
+              "base": "USDT",
+              "kind": "v3"
+            },
+            {
+              "pair": "0x9540e735a8ba603c304edbf9632d5af7228bacc2",
+              "reserve0": 100497492216887,
+              "reserve1": 22849267270796238,
+              "priceable": false,
+              "base": "USDT",
+              "kind": "v2"
+            },
+            {
+              "pool": "0xdebed59510885e29ce1d3da0e5412d49d21f0354",
+              "fee": 2500,
+              "liquidity": 1669023351637666245597,
+              "tick": -12072,
+              "observationCardinality": 1,
+              "priceable": false,
+              "base": "WBNB",
+              "kind": "v3"
+            },
+            {
+              "pool": "0x2c4599f9b83a1707e238b301dbed3aff61c9c3a2",
+              "fee": 10000,
+              "liquidity": 359986223176101537,
+              "tick": -11993,
+              "observationCardinality": 1,
+              "priceable": false,
+              "base": "WBNB",
+              "kind": "v3"
+            },
+            {
+              "pair": "0x217e9ed14c797df4597512d2245c00ca93e5a567",
+              "reserve0": 29783534921139185040,
+              "reserve1": 8896465391160969583,
+              "priceable": false,
+              "base": "WBNB",
+              "kind": "v2"
+            }
+          ]
+        },
+        {
+          "address": "0x9585879A2C23FA674A45E90e643A37fb1362FFFf",
+          "symbol": "NVDAB",
+          "decimals": 18,
+          "totalSupply": 1000000000000000000000000000,
+          "venues": []
+        }
+      ]
+    },
+    "TSLAB": {
+      "found": true,
+      "tokens": [
+        {
+          "address": "0x5b1910eAaD6450E50f816082Aa078C41F10C292f",
+          "symbol": "TSLAB",
+          "decimals": 18,
+          "totalSupply": 52945482124630000000000,
+          "venues": [
+            {
+              "pool": "0xb0f5e5400e8f0f7c242f2b7740c004f020579c41",
+              "fee": 2500,
+              "liquidity": 440212564089678288960867,
+              "tick": -59098,
+              "observationCardinality": 2000,
+              "priceable": true,
+              "base": "USDT",
+              "kind": "v3"
+            },
+            {
+              "pool": "0x613ebcfcf41749571d659a0bf3e2c0032fd4859e",
+              "fee": 10000,
+              "liquidity": 67068529936274301417749,
+              "tick": -59018,
+              "observationCardinality": 1,
+              "priceable": false,
+              "base": "USDT",
+              "kind": "v3"
+            },
+            {
+              "pair": "0xac5cb50d90a7a2bc5def56194be8d93c905bcd5f",
+              "reserve0": 943674199856310759,
+              "reserve1": 2592029668522155,
+              "priceable": false,
+              "base": "USDT",
+              "kind": "v2"
+            },
+            {
+              "pool": "0x787f3ebb965a7c5484d08b143809d8c4b043cd45",
+              "fee": 2500,
+              "liquidity": 130610802760070128101,
+              "tick": -7179,
+              "observationCardinality": 1,
+              "priceable": false,
+              "base": "WBNB",
+              "kind": "v3"
+            },
+            {
+              "pair": "0x162d64349c57ff06ad69551870f0414f694e6491",
+              "reserve0": 14562104015330758357,
+              "reserve1": 7114698279852148671,
+              "priceable": false,
+              "base": "WBNB",
+              "kind": "v2"
+            }
+          ]
+        },
+        {
+          "address": "0xaD454c101DDEa0945AE187E3e451771a139d1436",
+          "symbol": "TSLAB",
+          "decimals": 8,
+          "totalSupply": 10000000000000000,
+          "venues": [
+            {
+              "pair": "0x660b2b467fc827fc057b9e7682c2e13ccb556b78",
+              "reserve0": 440642142334499839077,
+              "reserve1": 57128326655423,
+              "priceable": false,
+              "base": "WBNB",
+              "kind": "v2"
+            }
+          ]
+        },
+        {
+          "address": "0x8fD152e63531EFbfbD98A13D4d97C4267D0974ee",
+          "symbol": "TSLAB",
+          "decimals": 8,
+          "totalSupply": 1000000000000000000,
+          "venues": [
+            {
+              "pair": "0x292418f2e34313cc0047fbac85b658f958d535e3",
+              "reserve0": 87272233528960037261822,
+              "reserve1": 172450623837263,
+              "priceable": false,
+              "base": "WBNB",
+              "kind": "v2"
+            }
+          ]
+        },
+        {
+          "address": "0x38850d149a747e943aa4F621b333ee6b26B7FffF",
+          "symbol": "TSLAB",
+          "decimals": 18,
+          "totalSupply": 1000000000000000000000000000,
+          "venues": []
+        }
+      ]
+    },
+    "AAPLB": {
+      "found": true,
+      "tokens": [
+        {
+          "address": "0x431a3BEE82E2ca41e49895CbECE5bB0F76A89b7A",
+          "symbol": "AAPLB",
+          "decimals": 18,
+          "totalSupply": 21414834476250000000000,
+          "venues": [
+            {
+              "pool": "0xe9b9998b2ec5430d2246c7f1f8d9f298c97d7365",
+              "fee": 2500,
+              "liquidity": 726346339985437109813878,
+              "tick": 57581,
+              "observationCardinality": 2000,
+              "priceable": true,
+              "base": "USDT",
+              "kind": "v3"
+            },
+            {
+              "pool": "0xe9a0fa4f1e30704c2f394d1053ff2c62c4d745bc",
+              "fee": 10000,
+              "liquidity": 1427174722285725597,
+              "tick": 57659,
+              "observationCardinality": 60,
+              "priceable": true,
+              "base": "USDT",
+              "kind": "v3"
+            },
+            {
+              "pool": "0x5aca9563f8d14a6d79f12421d549a5606644a270",
+              "fee": 2500,
+              "liquidity": 29271558016969300178,
+              "tick": -8695,
+              "observationCardinality": 1,
+              "priceable": false,
+              "base": "WBNB",
+              "kind": "v3"
+            },
+            {
+              "pair": "0x550c36d2c777f8621d300f2aa9da4fda5aefffe5",
+              "reserve0": 15737240357066611259,
+              "reserve1": 6601325875793795980,
+              "priceable": false,
+              "base": "WBNB",
+              "kind": "v2"
+            }
+          ]
+        },
+        {
+          "address": "0x0f8c84735C3FdB9bd2046C19D3eEcBDb94f1ffff",
+          "symbol": "AAPLB",
+          "decimals": 18,
+          "totalSupply": 1000000000000000000000000000,
+          "venues": []
+        }
+      ]
+    },
+    "MSFTB": {
+      "found": true,
+      "tokens": [
+        {
+          "address": "0x80106cb3EAD06659A5ad19DF39D9b4733863B9b0",
+          "symbol": "MSFTB",
+          "decimals": 18,
+          "totalSupply": 5602043365070000000000,
+          "venues": [
+            {
+              "pool": "0x5018b018ceb7645c927c5cf246786f89ebcbe7ea",
+              "fee": 2500,
+              "liquidity": 74342834984833057736253,
+              "tick": -61993,
+              "observationCardinality": 100,
+              "priceable": true,
+              "base": "USDT",
+              "kind": "v3"
+            },
+            {
+              "pool": "0x58e44c2e5b17ef40915b4b3ae8451b6b87285b44",
+              "fee": 10000,
+              "liquidity": 17122081118742447972468,
+              "tick": -62054,
+              "observationCardinality": 300,
+              "priceable": true,
+              "base": "USDT",
+              "kind": "v3"
+            },
+            {
+              "pair": "0x8d3848bd2a14492f5077dc67840644006a10ffa6",
+              "reserve0": 10136890558543429962,
+              "reserve1": 6588869551484212337,
+              "priceable": false,
+              "base": "WBNB",
+              "kind": "v2"
+            }
+          ]
+        },
+        {
+          "address": "0xeaF7cCfd79A12ffD9A90BE265cF0a9Ab5d2aFfFF",
+          "symbol": "MSFTB",
+          "decimals": 18,
+          "totalSupply": 1000000000000000000000000000,
+          "venues": []
+        }
+      ]
+    },
+    "TSLAx": {
+      "found": true,
+      "tokens": [
+        {
+          "address": "0x8aD3c73F833d3F9A523aB01476625F269aEB7Cf0",
+          "symbol": "TSLAx",
+          "decimals": 18,
+          "totalSupply": 20000000000000000000000,
+          "venues": [
+            {
+              "pool": "0x5e12d6edb2b7d5330e474ea2d2694a3b3e35d492",
+              "fee": 2500,
+              "liquidity": 1576166738998165198,
+              "tick": -58820,
+              "observationCardinality": 1,
+              "priceable": false,
+              "base": "USDT",
+              "kind": "v3"
+            },
+            {
+              "pair": "0xdc5d5068f5af6ee4981ece4f245843430be32a96",
+              "reserve0": 4237083140689074521,
+              "reserve1": 12063411712531706,
+              "priceable": false,
+              "base": "USDT",
+              "kind": "v2"
+            },
+            {
+              "pair": "0xfc934f5b8fedcea8bf666774060c87455cfcc99a",
+              "reserve0": 1139009245368784,
+              "reserve1": 577832942634788,
+              "priceable": false,
+              "base": "WBNB",
+              "kind": "v2"
+            }
+          ]
+        }
+      ]
+    },
+    "NVDAx": {
+      "found": false
+    },
+    "AAPLx": {
+      "found": false
+    },
+    "MSFTx": {
+      "found": false
+    },
+    "QQQx": {
+      "found": false
+    },
+    "SPYx": {
+      "found": false
+    }
+  }
+}

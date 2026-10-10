@@ -1,0 +1,108 @@
+AUDITED_TREE=7076b8fca953e6f9e0fe078768ebd85c10ac4834
+
+**1. Is any site missing from the census? Yes.**
+
+I checked the 16 active mechanisms. The accepted census-coverage family is not counted again.
+
+| Mechanism | Missing sites or assessment |
+|---|---|
+| fee-conservation | No additional missing site found. |
+| opening-caps | No additional missing site found. |
+| principal-locking | No additional missing site found. |
+| vesting-entitlement | No additional missing site found. |
+| oracle-write | No additional missing site found. |
+| realised-spend | `_release` and payout settlement. [Source](src/TorchHook.sol:717) |
+| epoch-attribution | `currentEpoch`, which selects the earning day. [Source](src/TorchEpochRewards.sol:44) |
+| route-authority | No additional missing site found. |
+| reentrancy | Direct claims, `_release`, buyback, LP collection, converter `_hop`, and vesting `claim` need their ordering or enclosing-lock arguments. [Direct claims](src/TorchHook.sol:622), [vesting](src/TorchVesting.sol:77) |
+| execution-value | Converter execution/history helpers, buyback’s validation call, and oracle search/interpolation. [Execution](src/TorchConverter.sol:231), [search](src/TorchOracle.sol:146) |
+| asset-backing | The new bounded-payout row names only `claimCreator`; `claimReferrer` and `_claimTo` carry the same obligation. Converter receipt/payment/delivery, buyback/LP settlement and vesting funding also remain omitted. [Census](docs/site-census.md:198), [referrer debit](src/TorchHook.sol:628), [funding](src/TorchFactory.sol:149) |
+| spending-rate | `_allowanceShape`, pending/allowance readers, LP collection and the callback supplying realised spend. [Shape](src/TorchHook.sol:848) |
+| launch-identity | `predictCoin`, `_buildKey` and `_onPoolInitialized`. [Prediction](src/TorchFactory.sol:182) |
+| fixed-supply | No additional missing site found. |
+| pool-isolation | Banking, purchase-ledger writes, payouts and oracle/epoch storage operations. Epoch aggregation is per quote, shared across pools using that quote. [Banking](src/TorchHook.sol:929), [aggregation](src/TorchEpochRewards.sol:53) |
+| swap-admission | Specified-fee arithmetic, checked narrowing and connected oracle/epoch writes. [Narrowing](src/TorchMath.sol:17) |
+
+**2. Is there a guarded behaviour without a `### mechanism:` section? Yes.**
+
+- **Callback/writer authentication:** manager, vault, active conversion pool, oracle writer and epoch recorder authorization. [Manager guard](src/TorchCLHookBase.sol:55), [conversion callback](src/TorchConverter.sol:324).
+- **Venue compatibility:** callback encoding, signed deltas, key hashing and parameter packing. [Packing](src/TorchParameters.sol:23).
+- **Dead-address disposition:** zero-recipient refusal, creator redirection and seed/LP disposal. [Redirection](src/TorchHook.sol:959).
+- **Claim liveness across settlement limits:** cumulative entitlements must remain withdrawable without deleting unpaid value. This includes direct claims, combined claims and accumulated LP fees. [Combined payout](src/TorchHook.sol:695), [LP collection](src/TorchHook.sol:551).
+
+PATCHED — r10a H1: creator and combined payouts are bounded correctly; direct referrer claims erase their remainder. H1 below. Another cumulative settlement path remains vulnerable: H2.
+
+PATCHED — r10a M1: several claims were corrected, but unconditional quote-claim availability and smaller-conversion retry guidance remain. M1 below.
+
+PATCHED — r10b M1: the named decimals, duration, I1, allowance, venue-disclosure and governance-witness corrections landed; overall claims consistency remains incomplete.
+
+PATCHED — r10b M2: young-pool admission now has a distinguishing witness, eight swaps now execute, and hourly wording was corrected. The tolerance and freeze evidence remain deficient. M2 below.
+
+**HIGH**
+
+**H1 — A permissionless referrer claim permanently deletes the unpaid excess.**
+
+`claimReferrer` caps `amount` at `MAX_SETTLEMENT`, then sets the entire pending entry to zero. It pays only the capped amount. Its accept set therefore includes calls that destroy someone else’s entitlement. The ordinary `claim` wrapper reaches the same path. [Cap and deletion](src/TorchHook.sol:622), [wrapper](src/TorchHook.sol:649).
+
+Concrete construction:
+
+1. Use the admitted 36-decimal fixture, with `referrerBps = 3000`, and supply `abi.encode(referrer)` on each buy. Keep its supply, liquidity, ordinary quote token and post-cap trading state. [Fixture](test/TorchClaimBound.t.sol:74).
+2. Execute 600 buys of `10^38` raw quote units without claiming. Each referral credit is `floor(floor(10^38 / 101) × 3000 / 10000)`. [Referral banking](src/TorchHook.sol:949).
+3. Any address calls `claimReferrer(key, referrer)`.
+
+The pending balance is approximately **178.217822 quote tokens**. The call pays approximately **170.141183** and permanently erases **8.076638**, exactly `8076638321708986090094874501937676273` raw units. Its vault backing remains, but neither claim path can recover the deleted entitlement.
+
+`claimCreator` correctly increments `creatorPaid` only by the capped payment. `_claimTo` correctly shares one settlement budget between creator and referral components and subtracts only the referral amount paid. The regression test exercises only the creator path, leaving this sibling defect undetected. [Creator debit](src/TorchHook.sol:610), [combined debit](src/TorchHook.sol:695), [witness](test/TorchClaimBound.t.sol:109).
+
+**H2 — Accumulated LP fees can still exceed one settlement and become permanently uncollectable.**
+
+Torch’s sole LP collection path requests the position’s entire accumulated fees with `modifyLiquidity(liquidityDelta: 0)`. There is no bounded collection amount. The venue calculates those fees as unsigned cumulative amounts, then casts each entire amount to `int128` before returning. Thus failure happens before Torch can bank or cap anything. [Torch integration](src/TorchHook.sol:551), [dependency’s narrowing](lib/infinity-core/src/pool-cl/libraries/CLPool.sol:149).
+
+A short construction uses the same 36-decimal pool:
+
+1. Execute one buy so the seeded position is active.
+2. A funded caller makes two venue donations of `10^38` raw quote units each, settling each in a separate vault lock. Each donation individually fits the signed limit.
+3. Call `collectLpFees(key)`.
+
+The venue accepts public donations and adds them to the active position’s fee growth. Torch registers no donation callback that would collect or constrain this accumulation. [Donation entry](lib/infinity-core/src/pool-cl/CLPoolManager.sol:215), [fee growth](lib/infinity-core/src/pool-cl/libraries/CLPool.sol:463), [Torch bitmap](src/TorchCLHookBase.sol:36).
+
+At the fixture’s liquidity, those donations alone create **`2 × 10^38 − 1` raw units** of collectable LP fees—above `MAX_SETTLEMENT`. Collection reverts; its checkpoint update rolls back. Subsequent collections encounter the same oversized entitlement, and ordinary claims cannot reach fees that were never banked.
+
+This is another unbounded cumulative settlement in Torch’s integration. It is separate from the accepted converter stray-balance boundary.
+
+**MEDIUM**
+
+**M1 — Two round-10 claim discrepancies remain unchanged.**
+
+- The interface still says quote claiming “always works”; I15 repeats it. Accrue a claim and freeze its quote token: payout reverts, as the existing isolation witness demonstrates. The new README disclosure does not correct these unconditional statements. [Interface](docs/interface.md:237), [counterexample](test/TorchIsolation.t.sol:133).
+- The plan still instructs callers to retry a refused conversion with smaller `amountIn`. `claimAsBnb` exposes no amount argument. For a creator-only entitlement below `MAX_SETTLEMENT`, every retry offers that entire entitlement again. Plain quote claiming remains a fallback, but the documented smaller-conversion operation does not exist. [Instruction](docs/plan.md:556), [entry path](src/TorchHook.sol:686).
+
+**M2 — Two rewritten witnesses still overstate their evidence.**
+
+**I11:** The new test does execute exact-in/out buys and sells in both orderings. That coverage gap is repaired. However, **0.1% is not an appropriate advertised rounding tolerance** for the stated invariant.
+
+At its `1_000_000e18` input, the quote comparison permits roughly **1,000 whole quote tokens** of disagreement; the buy-fee comparison permits roughly **9.9 whole quote tokens**. The test attributes this tolerance to rounding and the corrections, while the plan promises agreement within one wei. [Eight-swap test](test/TorchFeeTake.t.sol:280), [tolerance](test/TorchFeeTake.t.sol:287), [promise](docs/plan.md:192).
+
+Use a justified rounding bound, separating fee arithmetic from price-dependent input rounding. A 0.1% check can be described as a loose regression check; it does not establish the advertised rounding-scale equivalence.
+
+**Real-token freeze:** The probe transfers the **placeholder token from `AAPLB_HOLDER`**, although the fixture identifies a different `placeholderHolder`. It establishes neither sufficient placeholder balance nor a successful identical transfer before pausing. [Fixture holders and funding](test/TorchEndToEnd.t.sol:299), [probe](test/TorchEndToEnd.t.sol:332).
+
+If that account has no placeholder balance, an unfrozen token’s insufficient-balance revert satisfies `assertFalse(moved)`. The witness therefore still cannot attribute refusal to freezing. It also performs no frozen claim attempt or unpause-and-claim recovery sequence afterward. [Remaining assertions](test/TorchEndToEnd.t.sol:336).
+
+The **young-pool witness is repaired**: it establishes positive allowance, verifies insufficient history and requires `OracleTooYoung` specifically. [Witness](test/TorchBuyback.t.sol:371).
+
+**LOW**
+
+None reported.
+
+The conversion refusal remains atomic: a failed hop unwinds earlier hops and claim debits. No additional intermediate-token stranding or inconsistent state between platform presses was established; those platform presses are absent from this tree. [Per-hop refusal](src/TorchConverter.sol:262).
+
+**EXECUTION-NOTES**
+
+- Initial and final HEAD matched the pin. All 85 tracked review-path files checked matched pinned blobs; cited dependency files also matched. No files were changed.
+- Boundary checks, census scan and all 96 census parser self-tests passed.
+- All 43 mutation anchors occur uniquely; mutations were not executed.
+- Exact integer calculations verified the referral loss, donation fee-growth overflow and combined-claim boundary arithmetic. These constructions were **not EVM-reproduced**.
+- Foundry completed compilation, then failed writing artifacts because the workspace is read-only. Solidity tests and fork tests did not execute.
+
+VERDICT: HIGH=2 MEDIUM=2 LOW=0

@@ -1,0 +1,39 @@
+# Every read in `src/` of a guardian frozen-time counter, or of an oracle
+# AVERAGE, with the decision made about it. Grep-derived and counted by
+# `tools/check-boundaries.py guardian-reads`, which goes red if a site is added,
+# removed or moved between files without a decision being written here.
+#
+# This is the sweep for the reads a FIX creates. `audit/freeze-clocks.allow`
+# counts raw `block.timestamp`/`block.number`; that caught new CLOCKS and did
+# not catch the v1.6.15 round's two findings, both of which were reads of an
+# existing instrument in a place that needed a different one. Comments are
+# stripped before counting, so a docstring naming a function is not a site.
+#
+#   <file> <expression> <count> <decision>
+#
+# Decisions, and what each one asserts:
+#
+#   ALL-only            the calls this protects are refused by the freeze --
+#                       and since v1.6.17 there is only one, so every guardian
+#                       read in `src/` carries this. The `ALL+pool` decision and
+#                       the instruments it named (`frozenSecondsFor`,
+#                       `unfrozenAtFor`) went with the pool-scoped freeze.
+#   open-time-gated     an oracle AVERAGE, read only after a full TWAP_WINDOW
+#                       of OPEN time in that pool. A freeze writes no
+#                       observations, so an ungated average is a reading of the
+#                       freeze and not of the market.
+#   gated-by-consumer   an oracle average read by a contract that holds no
+#                       guardian reference; the gate is applied where it is
+#                       consumed, and the consumer is named below.
+#   external-venue      an average taken on a venue this system cannot freeze,
+#                       so no feast freeze can pin it.
+
+FeastPlatformSink.sol guardian.frozenSeconds( 5 ALL-only
+FeastEmissions.sol guardian.allUnfrozenAt( 1 ALL-only
+FeastEmissions.sol guardian.frozenSeconds( 2 ALL-only
+FeastEmissions.sol guardian.frozenSecondsAt( 1 ALL-only
+FeastHook.sol guardian.allUnfrozenAt( 1 ALL-only
+FeastHook.sol oracle.twapTick( 2 open-time-gated
+FeastPricer.sol oracle.twapTick( 1 gated-by-consumer
+FeastPricer.sol pool.observe( 1 external-venue
+FeastLaunchWindow.sol guardian.frozenSeconds( 1 ALL-only

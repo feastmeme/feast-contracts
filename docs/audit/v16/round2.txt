@@ -1,0 +1,116 @@
+AUDITED_TREE=cbc014ae4a774df75727708e70add208505bbc6c
+
+G1 — STANDS. Swap admission, internal fills, and buybacks use the same strict `timestamp < openAt` boundary. The remaining hook liquidity paths seed or collect fees without trading. [Swap gate](src/FeastHook.sol:388), [fill gate](src/FeastHook.sol:449), [buyback gate](src/FeastHook.sol:1030).
+
+G2 — DEFECTIVE. Other known unsuitable recipients remain accepted; an empty factory does not establish that recipients can spend their allocations. M1 below.
+
+G3 — STANDS. The test asserts fourteen days literally, and the registered mutation changes the constant to twenty-eight days. Mutation execution was not performed. [Test](test/FeastGate.t.sol:164), [mutation](tools/mutate.py:479).
+
+G4 — DEFECTIVE. All thirteen census additions and the supply-reduction witness are present. The reentrancy witness asserts `fired()`, but cannot distinguish a debit moved after payout. L2 below. [Burn witness](test/FeastGenesis.t.sol:186).
+
+G5 — STANDS. Bytecode verification is explicitly pending until the freeze, rather than represented as completed. [Pending qualification](plans/v16/plan.md:242).
+
+I read the complete `src` delta against `4d008d1`, the six resulting changed/new contracts, related hook-base, constants, token, oracle and settlement code, the specified venue implementations, package-1 tests and fixtures, mutation definitions, census, deployment script, interface/ABI files, owner rulings, specification, applicable plan sections and round-13 residue record. I attempted `forge build --offline`: Solc completed compilation, but artifact writes failed under the read-only sandbox. I did not run `forge test` or execute mutations.
+
+**MEDIUM**
+
+**M1 — Genesis destination validation still permits permanently stranded allocations and platform fees.**
+
+`_requireOutsider` excludes only four addresses. For example, naming the existing oracle as `teamVesting` and ledger as `emissions`, with a distinct valid grants recipient, passes the checks and transfers 34.2% of supply into contracts without token-withdrawal paths. The factory finishes empty. [Incomplete exclusion](src/FeastFactory.sol:320), [transfers and final check](src/FeastFactory.sol:283).
+
+The same root cause reaches the sink: genesis accepts `platformSink = address(hook)`. Subsequent releases debit platform entitlement and deliver raw quote tokens to the hook, outside its claim accounting. [Sink validation](src/FeastFactory.sol:242), [release](src/FeastHook.sol:986).
+
+The predicted platform coin cannot pass an allocation recipient’s predeployment code check. The final factory-balance check executes, but its rejecting branch is redundant under the fixed token’s transfers once factory recipients are excluded; it cannot detect these destination failures.
+
+Fix the known unsuitable-destination class across allocations **and** sink binding, and verify the intended recipients’ custody paths. Preserve genesis-bound addresses and the sink’s permitted delayed deployment; neither requires introducing permanent authority.
+
+**M2 — The internal fill requires coins physically present before the seller settles, violating swap admission.**
+
+The hook immediately takes and burns coins during `beforeSwap`. The venue’s `take` performs an actual token transfer; matching transient deltas do not guarantee sufficient physical balance at that instant. [Fill settlement](src/FeastHook.sol:480), [venue transfer](lib/infinity-core/src/Vault.sol:143).
+
+A constructable witness uses an open pool with a positive fill allowance:
+
+1. Within one vault lock, a router temporarily takes the vault’s coin balance.
+2. It submits an exact-input sale, intending to return the borrowed coins and settle its sale before releasing the lock.
+3. Without the fill, the pool can account for the sale and accept settlement afterward.
+4. With any positive fill, the hook’s immediate coin transfer fails because the vault is temporarily empty.
+
+Thus an otherwise settleable operation reverts because of the optional fill. The existing router fixture also settles inputs only after `swap` returns. [Settlement ordering](test/utils/PoolRouter.sol:61).
+
+Bound the immediate fill by available coin custody, or skip it when custody is insufficient. Perform that decision before debiting claims or buckets, and recompute quote payment after reducing the fill. Catching only the failed transfer after earlier effects would introduce an accounting violation.
+
+**M3 — Published ABIs remain incompatible with the package-1 implementation.**
+
+The factory ABI omits `metadataHash` from both argument tuples, `getCoin`’s result and `CoinCreated`. Compare the published [create tuple](docs/abi/FeastFactory.json:158) and [genesis tuple](docs/abi/FeastFactory.json:261) with the implemented [create field](src/FeastFactory.sol:101) and [genesis field](src/FeastFactory.sol:122).
+
+This changes callable selectors:
+
+| Function | Published ABI | Implementation |
+|---|---|---|
+| `create` | `0xdee52e31` | `0xef84c3b4` |
+| `genesis` | `0x54abcabb` | `0x04076274` |
+
+Clients using those ABI files encode incompatible calls. Their creation-event filter also uses the old event signature. The [hook ABI](docs/abi/FeastHook.json:1) contains neither `Trade` nor `InternalFill`.
+
+Regenerate the affected ABIs from the audited source, update consumers and verify ABI parity. This requires no economic change; callers must continue supplying an explicit metadata value. The Q23/Q24 integration deliverables are currently incomplete.
+
+**LOW**
+
+**L1 — Successful buybacks emit no `Trade`.**
+
+The buyback executes a venue swap, observes its resulting price and emits `BoughtBackAndBurned`, but never invokes `_emitTrade`. Its callbacks are skipped because the hook is itself the swapper. Consequently, a chart consuming the promised single event stream misses buyback volume and price changes. [Buyback swap](src/FeastHook.sol:742), [return after observation](src/FeastHook.sol:766), [terminal event](src/FeastHook.sol:1074).
+
+Emit one `Trade` for each successful buyback using its venue delta, post-swap price and zero Feast fee. Use coin output before tip/burn distribution. This preserves the gate and avoids adding ledger credit or duplicate events.
+
+**L2 — G4’s reentrancy witness does not detect its named regression.**
+
+Moving `platformUsed += amount` after `_release` leaves the assertions satisfied: the callback reaches another release, its nested vault lock reverts, the mock ignores that failure, and the outer call subsequently debits once. `fired()` remains true and the sink receives exactly one payout. [Assertions](test/FeastPlatformExit.t.sol:170), [ignored callback result](test/utils/MockERC20.sol:85), [nested-lock refusal](lib/infinity-core/src/libraries/SettlementGuard.sol:29).
+
+Record and assert callback success for this fully drained bucket: correct ordering returns successfully through the empty-bucket branch; the proposed mutant fails. This strengthens the test without changing production behavior.
+
+**L3 — Three mutation definitions became stale after the new hook changes.**
+
+Read-only anchor inspection found zero matches for:
+
+- [Moving the gate below the early return](tools/mutate.py:328).
+- [Reporting the pool’s quote instead of the trader’s](tools/mutate.py:498).
+- [Replacing the observed tick with a constant](tools/mutate.py:652).
+
+The runner correctly treats missing anchors as failures, so these entries prevent the required mutation gate from passing. Retarget and execute all three; this introduces no production-code violation.
+
+**L4 — The normative claim that every fixture wires all collaborators is false.**
+
+The plan states that no fixture passes zero for any collaborator, but the shared package-1 hook fixture supplies a zero converter. [Normative assurance](plans/v16/plan.md:582), [actual wiring](test/utils/HookFixture.sol:71).
+
+Wire the collaborator to satisfy that assurance. Adding its deployment requires updating the fixture’s CREATE prediction; otherwise the correction would break oracle/ledger writer wiring. This is a verification defect, not evidence of an exploitable production converter bug.
+
+**Deliverable endorsements and completeness**
+
+I would not sign off package 1 for external submission or immutable deployment in this state.
+
+| Deliverable | Assessment |
+|---|---|
+| Weekly three-track ledger | Endorse implementation: headroom checks and role coalescing preserve account/total equality under the declared saturation policy. [Record](src/FeastFeeLedger.sol:111) |
+| `openAt` gate | Endorse implementation; G1 and G3 stand. |
+| Referral rule | Endorse implementation: one resolver governs commission and ledger attribution. [Resolver](src/FeastHook.sol:359) |
+| Platform-fee exit | Blocked by M1’s sink-binding case and L2’s claimed verification. Payment cap and debit amount are otherwise correct. |
+| Genesis and platform token | Blocked by M1 and M3. Mint authority, fixed supply, split arithmetic and token/deployer construction otherwise stand. |
+| Internal fill | Blocked by M2. |
+| `Trade` | Blocked by L1 and M3. Callback-path amounts match the trader’s delta on all four branches, including fills. |
+| Metadata digest | Solidity storage and emission preserve the supplied value, including zero; delivery remains blocked by M3. [Ordinary creation](src/FeastFactory.sol:206), [genesis](src/FeastFactory.sol:299) |
+
+For filled sales, hook delta `(X, fee − Y)` cancels coin take `−X`, quote-claim burn `+Y`, and fee-claim mint `−fee`. The fee includes the whole gross quote amount. I found no additional allowance, transient-handoff or payment-above-spot defect: fills and presses debit the same allowance, retaining the existing cap-plus-refill bound and standing dust exception. [Whole-sale fee](src/FeastHook.sol:616), [handoff clearing](src/FeastHook.sol:492).
+
+All eight mechanisms have implementation code. The incomplete ABI delivery and missing buyback event are additional completeness blockers; package-2 implementation and the explicitly pending freeze record are not counted as omissions. No additional applicable open-domain inline-implementation violation was identified.
+
+**EXECUTION-NOTES — uncounted**
+
+- Initial and final HEAD matched the pin; citation targets were checked against pinned blobs.
+- Census validation passed: 148 rows. Of 84 mutation definitions, three had absent anchors.
+- Selector calculations and ABI inspection ran; Solidity tests, fork tests and mutation kills did not.
+- The attack constructions above are source-derived, not executed EVM witnesses.
+- A concurrent coordinator-document edit was excluded by rereading its pinned version. I made no source edits.
+
+scheme-entity findings this round: yes — original genesis/exit destination validation still accepts unusable recipients.
+
+VERDICT: HIGH=0 MEDIUM=3 LOW=4

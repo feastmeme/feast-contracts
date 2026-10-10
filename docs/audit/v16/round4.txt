@@ -1,0 +1,136 @@
+AUDITED_TREE=3d5b2c315c3d83656937dba6228fa0557af023f7
+
+G1: STANDS — claims-only settlement balances the hook’s deltas; I found no router-ordering break or path that spends the reserved coin claims without a corresponding entitlement debit.
+
+G2: STANDS — the deferred burn is permissionless, bounded, debited before settlement, and uses `Action.Payout`. Census completeness remains unverified as noted below. [FeastHook.sol:445](src/FeastHook.sol:445)
+
+G3: STANDS — `type(int256).min` bypasses the fill before negation. [FeastHook.sol:410](src/FeastHook.sol:410)
+
+G4: DEFECTIVE — arithmetic is safe and rounded once inside the domain, but the domain excludes plausible markets with six-decimal quotes. See L1.
+
+G5: STANDS — the witness freezes the quote and completes a filled sale through the claim-settling router. [FeastInternalFill.t.sol:302](test/FeastInternalFill.t.sol:302)
+
+I read every changed Solidity file in `src/` and `script/`, the supporting hook base, oracle, constants, math and venue interfaces; the relevant ledger, attribution, gate, genesis, fill, trade, exit, emissions, package-two, authority and recipe tests and fixtures; relevant portions of the three audit tools; the supplied brief, spec, interface, coordinator answers, plan §R–§R3 and v1 §3–§4. I attempted build and tests. Neither completed: normal runs failed writing the cache; cache-disabled compilation finished but artifact writes were denied. I also completed an independent in-memory compilation for the deployment-size finding.
+
+**HIGH**
+
+**H1 — Moving the platform price after the grace period disables the value cap.**
+
+`Moved` prevents settlement only while `!graceOver`. Afterwards it enters the token-cap-only branch, although the platform pool already has mature price history. [FeastEmissions.sol:263](src/FeastEmissions.sol:263)
+
+A trader with credits in an unsettled, closed week can wait three days, move FEAST’s spot more than 300 ticks from its average, settle, and reverse the price move in the same transaction. The manipulation’s duration need not change the TWAP. With all tracks populated, week 10 can distribute approximately **4.43 million FEAST**, even where 1 BNB of fees and a price of 1,000 FEAST/BNB should limit distribution to **150 FEAST**.
+
+This is a concrete post-launch bypass of the two-cap mechanism, independent of the accepted pre-TGE rule. The existing value-cap test explicitly requires `Status.Ok`, so it misses this path. [FeastEmissions.t.sol:188](test/FeastEmissions.t.sol:188)
+
+Fix: retain the refusal for `Moved` after grace; preserve the separately authorized pre-launch fallback. This introduces no new accounting violation, though settlement must wait for an acceptable platform price.
+
+**MEDIUM**
+
+**M1 — Empty tracks let the redirect exceed its 50% bound.**
+
+The redirect is calculated from `cap` before empty tracks are skipped. Consequently, the escrow receives a larger fraction of what is actually emitted than the configured percentage. [FeastEmissions.sol:276](src/FeastEmissions.sol:276)
+
+Construct an early week containing only unreferred platform-coin trades: the trader track exists, while the creator and referrer tracks are empty. With `cap = 10,000` and redirect `5000`:
+
+- Escrow receives 5,000.
+- Traders receive 2,250.
+- Actual emission is 7,250; **68.97% goes to escrow**.
+
+The existing redirect test populates all three tracks and therefore cannot expose this case. [FeastEmissions.t.sol:299](test/FeastEmissions.t.sol:299)
+
+Fix: calculate the nonempty tracks’ emission first, then redirect a bounded fraction of those amounts. Preserve empty-track non-emission and rounding conservation; that fix introduces no new violation.
+
+**M2 — Genesis attempts to deploy an oversized script contract.**
+
+Inside the broadcast region, `Genesis.launch` executes `new DeployPackage2()` solely to call `platformPoolKey`. [Genesis.s.sol:56](script/Genesis.s.sol:56), [Genesis.s.sol:63](script/Genesis.s.sol:63)
+
+An independent flattened compilation using Solidity 0.8.26, Cancun, via-IR and 20,000 optimizer runs produced **42,489 runtime bytes** and the compiler’s 24,576-byte-limit warning. Once placeholders are populated, this deployment cannot succeed under that limit, so the script cannot reach window deployment or genesis.
+
+Fix: share the pool-key calculation through an internal library/helper. Removing this deployment does not disturb the platform token’s prediction or genesis-bound recipients. Validate the actual broadcast transaction sequence with normal code-size limits.
+
+**LOW**
+
+**L1 — The fill cutoff silently disables layer 2 for plausible six-decimal markets.**
+
+The “every real market” assertion treats raw-unit ratios as though decimals were irrelevant. [FeastHook.sol:499](src/FeastHook.sol:499)
+
+For an 18-decimal coin worth $0.000001 and a six-decimal quote worth $100:
+
+`raw quote/coin = 10^-20`
+
+When the coin sorts first, `sqrtPriceX96 ≈ 7,922,816,251,426,433,759`, below `2^64`. The inverse ordering also falls outside the permitted domain. These markets trade normally but never receive an internal fill, regardless of allowance or oracle maturity. Six-decimal quotes are within the stated assumption. [docs/plan.md:374](docs/plan.md:374)
+
+The current precision witness tests a price near 2.25, not this boundary. [FeastInternalFill.t.sol:355](test/FeastInternalFill.t.sol:355)
+
+Fix: support the required raw-price range with exact, bounded arithmetic. **Simply removing the guard introduces overflow**, and restoring successive floors reintroduces the previous rounding defect.
+
+**L2 — Two-hop price overflow escapes the unpriceable policy and blocks settlement.**
+
+Each hop can produce a representable ratio while their composition overflows. There is no guard around that multiplication or catch at the emissions call site. [FeastPricer.sol:130](src/FeastPricer.sol:130), [FeastEmissions.sol:239](src/FeastEmissions.sol:239)
+
+For two forward hops with `sqrtPriceX96 = 2^136`, each ratio is `2^208` in Q128. Composition requires `2^288`, exceeding `uint256`. Both square-root prices lie within the venue’s price range; sufficient history and matching spot/average ticks do not prevent this overflow.
+
+The revert blocks the whole week—even if that quote earned no fees—and still blocks it after three days. Sequential settlement also blocks later weeks. The existing “unpriceable, not reverted” test covers insufficient history, not arithmetic failure. [FeastPackageTwo.t.sol:49](test/FeastPackageTwo.t.sol:49)
+
+Fix: classify unrepresentable route prices as `Unpriceable` and preserve the grace-then-zero behavior at the consumer boundary. This introduces no new violation if valid prices retain their existing calculation.
+
+**Deliverable endorsement**
+
+“Yes” below means I found no component-specific code blocker; it does not override the unit’s findings or incomplete execution validation.
+
+| # | Deliverable | Endorsement |
+|---|---|---|
+| 1 | Weekly three-track ledger | Yes; conservation and role coalescing hold. |
+| 2 | `openAt` gate | Yes; callbacks and buyback are covered. |
+| 3 | Self-referral rule | Yes; commission and credit share one decision. |
+| 4 | Platform-fee exit | Yes; recipient validation and bounded debit hold. |
+| 5 | Genesis and supply routing | Yes, under the ruled genesis trust. |
+| 6 | Internal fill | **No — L1.** Claims settlement itself stands. |
+| 7 | `Trade` | Yes; filled sales and buybacks are included. |
+| 8 | Metadata digest | Yes; storage and event wiring match arguments. |
+| 9 | Pricer | **No — L2.** |
+| 10 | Emissions | **No — H1, M1 and L2.** |
+| 11 | Genesis grants | Local accounting endorsed; settlement availability depends on L2. |
+| 12 | Launch window | Yes; exclusive settlement and timed refunds are coherent. |
+| 13 | Team vesting | Yes; duration, start and disabled renunciation match rulings. |
+| 14 | Platform sink | Yes on inspected code; floor coverage needs strengthening. |
+| 15 | Recipient identification | Yes, within the explicitly trusted identity model. |
+| 16 | Deployment and timelock | Timelock wiring endorsed; **scripts blocked by M2**. |
+
+**P1–P20: test accountability**
+
+These assessments concern the assertions I inspected, not executed test results.
+
+| Invariant | Existing witness and whether it can fail for the stated reason |
+|---|---|
+| P1 | [`testFuzz_eachTotalIsExactlyTheSumOfItsAccounts`](test/FeastFeeLedger.t.sol:221): yes; independently sums account credits. |
+| P2 | [`test_aFeeLargerThanATrackIsIgnoredNotReverted`](test/FeastFeeLedger.t.sol:212): yes; an oversized-fee revert fails it. |
+| P3 | [`test_eachBranchCreditsTheWholeFeeToPayerCreatorAndReferrer`](test/FeastAttribution.t.sol:38): yes; fee deltas are compared with credits. Separate ledger and attribution tests cover weeks, zero roles and burn creators. |
+| P4 | [`test_aSelfReferralIsNoReferralOnAnyBranch`](test/FeastAttribution.t.sol:68): yes; checks both commission and referral credit. |
+| P5 | [`test_beforeOpenAtAStrangerCannotTradeOnAnyBranch`](test/FeastGate.t.sol:40): yes; companion tests exercise opener, boundary opening and ungated pools. |
+| P6 | [`test_theGateBoundIsFourteenDaysLiterally`](test/FeastGate.t.sol:164) and [`test_theOpenersTradeIsChargedButRecordedNowhere`](test/FeastGate.t.sol:70): yes; literal duration and ledger exclusion are asserted. |
+| P7 | [`test_aBucketLargerThanOneSettlementLeavesInPieces`](test/FeastPlatformExit.t.sol:144): yes; verifies payment and retained excess. Companion tests cover destination and other buckets. |
+| P8 | [`test_afterGenesisTheGenesisKeyHoldsNoPower`](test/FeastAuthority.t.sol:75): yes for the enumerated restricted entry points. |
+| P9 | [`test_theSplitIsSixtyFiveTwentyFifteenToTheUnit`](test/FeastGenesis.t.sol:238): yes; literal allocations, factory emptiness and total conservation. |
+| P10 | [`test_anExactInputSaleIsPartlyFilledFromTheBucketAtSpot`](test/FeastInternalFill.t.sol:101) and [`test_atMostTwentyPercentLeavesInAnyHourAcrossFillsAndPresses`](test/FeastInternalFill.t.sol:172): meaningful, but miss L1 and oversized deferred-burn/cross-pool claim witnesses. |
+| P11 | [`test_eachBranchEmitsOneTradeWithTheTradersOwnAmounts`](test/FeastTradeEvent.t.sol:65): yes; compares router deltas and post-swap price. No dedicated LP-collection non-emission assertion found. |
+| P12 | [`test_theMetadataHashIsStoredAndAnnounced`](test/FeastFactory.t.sol:111): yes for ordinary creation. Genesis’s dedicated test checks storage, not its event digest. |
+| P13 | [`test_theValueCapBindsOnceThePlatformCoinHasAPrice`](test/FeastEmissions.t.sol:188): catches removal of the normal cap, **misses H1 and L2**. Order, closure, curve and pre-launch funding have separate meaningful tests. |
+| P14 | [`testFuzz_theClaimsOfAWeekNeverExceedItsPots`](test/FeastEmissions.t.sol:169), expiry and remainder tests: meaningful payout/conservation assertions; pricing fixtures do not stress fractional quote valuation broadly. |
+| P15 | [`test_theBandsHoldAtTheCallee`](test/FeastEmissions.t.sol:270), next-week and pricer tests: catch direct bound/timing changes; **miss M1’s effective redirect percentage**. |
+| P16 | [`test_aGrantUnlocksByTheFeesItsPartnersLinksBring`](test/FeastPackageTwo.t.sol:128) and horizon test: meaningful. The test named “nothing is paid or burned before claims open” does not actually attempt a burn. |
+| P17 | [`test_theWholePotBuysOnceAndEveryoneGetsTheSamePrice`](test/FeastPackageTwo.t.sol:227) and [`test_anUnsettledWindowRefundsEveryCommitInFull`](test/FeastPackageTwo.t.sol:277): meaningful; failed-swap rollback and miswiring refunds lack dedicated witnesses. |
+| P18 | [`test_itVestsLinearlyForThirtySixMonthsFromTheWindowsClose`](test/FeastPackageTwo.t.sol:309) and renunciation/voting test: yes; literal duration, balances and refusal are asserted. |
+| P19 | [`test_aTakeBurnsItsPaymentAndReanchorsByTheShareTaken`](test/FeastPackageTwo.t.sol:362): meaningful for burn and re-anchor. No direct last-sale-floor or positive-cost dust regression found. |
+| P20 | Authority tests plus [`test_onlyTheTimelockPullsALever`](test/FeastEmissions.t.sol:246): meaningful caller refusals. The complete mechanical surface check was not executed. |
+
+**EXECUTION-NOTES — uncounted**
+
+- No source changes or deployments were made; HEAD and clean worktree status were rechecked.
+- Solidity compilation completed, but neither a complete Forge build nor any test run completed under the read-only sandbox. No fork or mutation results are claimed.
+- The prescribed reading scope excludes `docs/site-census.md`, so I did not inspect its rows. The inspected checker discovers `_release` callers; that does not certify direct-lock sites such as `burnFilledCoin`. [check-census.py:302](tools/check-census.py:302)
+- Standing v1 residue was not re-counted. I found no new open-domain prose enumeration requiring a triad in the scoped normative plan sections.
+
+scheme-entity findings this round: yes — emission settlement and allocation defects independent of the round-3 fixes.
+
+VERDICT: HIGH=1 MEDIUM=2 LOW=2

@@ -1,0 +1,28 @@
+out/
+cache/
+broadcast/
+.forge-snapshots/
+docs/audit-briefs/*/raw/
+# Lane and audit-round artifacts: the whole of .runs/ is a lane's own scratch —
+# anchors, operator state, round briefs (absolute paths), verdicts and gate logs.
+# `.runs/codex-loop/` and the anchor were ignored one at a time until a gate log
+# was committed by an `add -A` in v1.6.2; the directory is the honest unit.
+.runs/
+.env
+.DS_Store
+
+# python bytecode caches — build artifacts, never tracked
+__pycache__/
+*.pyc
+
+# Run-harness state (operator stream, mailbox): per-machine, never tracked.
+.runs/operator/
+.runs/mailbox/
+# The lane anchor: harness state the runner rewrites with machine paths; read on disk, never tracked.
+.runs/awaiting.json
+
+# Medusa writes these beside its config on every run; they are engine scratch,
+# and a dirty tree voids a contract-audit lens unit mid-flight.
+crytic-export/
+.medusa-artifact-hash
+test/audit/medusa/slither_results.json

@@ -1,0 +1,182 @@
+AUDITED_TREE=7ba96d913833d7fa89a64f2836a9ca2ee5224dc3
+
+**1. Is any site missing from the census? Yes.**
+
+I checked all 16 active mechanisms. Listing a function under another mechanism does not discharge its obligation here.
+
+| Mechanism | Assessment |
+|---|---|
+| fee-conservation | No additional site found missing. |
+| opening-caps | No additional enforcement site found missing. |
+| principal-locking | Both liquidity operations and their public entry points are listed. |
+| vesting-entitlement | Sites are listed; the allocation-authority witness remains inadequate. |
+| oracle-write | Ordinary swaps, self-buyback and same-second replacement are listed. |
+| realised-spend | Missing `_release` and payout settlement. [Source](src/TorchHook.sol:706) |
+| epoch-attribution | Missing `currentEpoch`, which assigns every recorded fee its epoch. [Source](src/TorchEpochRewards.sol:44) |
+| route-authority | No additional route-selection boundary found missing. |
+| reentrancy | Missing direct claims, `_release`, self-buyback, LP collection, converter `_hop`, and vesting `claim`. These require their ordering or enclosing-lock arguments. [Claims](src/TorchHook.sol:610), [hop](src/TorchConverter.sol:231), [vesting](src/TorchVesting.sol:77) |
+| execution-value | Missing converter `_hop`, `_oldestObservationAge`, buyback’s validation call, and oracle search/interpolation helpers. [History](src/TorchConverter.sol:311), [validation](src/TorchHook.sol:750), [interpolation](src/TorchOracle.sol:138) |
+| asset-backing | Missing direct-claim debits, converter receipt/callback/delivery, buyback and LP settlement, and factory funding of vesting. [Receipt](src/TorchConverter.sol:157), [settlement](src/TorchHook.sol:534), [funding](src/TorchFactory.sol:149) |
+| spending-rate | `_bank` and `_accruedScaled` are now listed. **The new `_allowanceShape` is missing**, although it determines both rates and the dust exemption. LP collection, the callback producing realised spend, and pending/allowance readers also remain missing. [Shape](src/TorchHook.sol:834), [current census](docs/site-census.md:211) |
+| launch-identity | Missing `predictCoin`, `_buildKey`, and `_onPoolInitialized`. [Prediction](src/TorchFactory.sol:182), [initialization](src/TorchHook.sol:254) |
+| fixed-supply | No additional underlying-token supply site found missing. |
+| pool-isolation | Missing `_bank`, purchase-ledger writes, direct payouts, and oracle/epoch storage operations. Epoch aggregation across pools sharing a quote is intentional and needs qualification. [Banking](src/TorchHook.sol:915), [aggregation](src/TorchEpochRewards.sol:53) |
+| swap-admission | Missing `_specifiedLegFee`, checked narrowing, and connected oracle/epoch writes. [Fee arithmetic](src/TorchHook.sol:279), [narrowing](src/TorchMath.sol:17) |
+
+The two retired mechanisms need no live-site inventory.
+
+**2. Is there a guarded behaviour with no `### mechanism:` section? Yes.**
+
+- **Callback and writer authentication:** manager-only callbacks, vault-only callbacks, active-pool authentication, oracle writer and epoch recorder authority protect accounting independently of reentrancy. [Callback guards](src/TorchCLHookBase.sol:55), [writer](src/TorchOracle.sol:62), [recorder](src/TorchEpochRewards.sol:50).
+- **Venue encoding compatibility:** signed deltas, pool-key hashing, parameter packing and callback ABIs must agree with the venue. [Delta decoding](src/venue/BalanceDelta.sol:14), [key hashing](src/venue/PoolId.sol:13), [packing](src/TorchParameters.sol:23).
+- **Dead-address disposition:** zero-creator refusal, burn-creator redirection, unused-seed disposal and LP-coin disposal implement I14 without a dedicated section. [Creator refusal](src/TorchFactory.sol:112), [redirection](src/TorchHook.sol:945), [LP disposal](src/TorchHook.sol:579).
+
+**Round-8 MEDIUM dispositions**
+
+Unchanged findings cannot truthfully receive a closure label; those are marked OPEN. Matching findings from both lenses share a line.
+
+CLOSED STRUCTURALLY — r8a M1 / r8b M1: the complete self-burn credit is computed before checkpointing and reaches one bucket-increase assignment. The separate LP-credit bypass is gone. [Implementation](src/TorchHook.sol:954).
+
+CLOSED BY WITHDRAWAL — r8a M2 / r8b M2: B4 expressly accepts zero-output granularity stranding, including cases where waiting cannot help. This closes the stronger spendability promise, not the physical limitation. Consumer-document discrepancies remain below. [Boundary](docs/plan.md:756).
+
+OPEN — r8a M3 / r8b M3: successful short delivery still retires full claims; M1 below.
+
+OPEN — r8a M4 / r8b M4: launch-address substitution remains; M2 below.
+
+OPEN — r8a M5 / r8b M5: the advertised TWAP-relative economic bound remains unsupported; M3 below.
+
+OPEN — r8a M6 / r8b M9: source-site resolution and witness relevance remain unchecked; M7 below.
+
+PATCHED, PARTIAL; STILL OPEN — r8a M7 / r8b M10: LP-credit witnesses and the parameter inequality were added, but critical evidence gaps remain; M8 below.
+
+OPEN — r8a M8 / r8b M6: deployment wiring and liquidity-sizing instructions remain incorrect; M5 below.
+
+OPEN — r8a M9 / r8b M8: discovery still overstates readiness and issuer verification; M6 below.
+
+PATCHED, PARTIAL; STILL OPEN — r8b M7: the dust exception is now disclosed, but other normative overclaims remain; M4 below.
+
+The earlier dust-ceiling overclaim is closed by qualification. Whole-unit accrual suppression is patched in source; its regression evidence remains incomplete.
+
+**HIGH**
+
+None established.
+
+**MEDIUM**
+
+**M1 — Successful short transfers still retire full entitlements.**
+
+The claim’s accept set includes a successful transfer that delivers less than the entitlement being retired.
+
+After an upgradeable quote introduces a 1% outbound tax, any caller can trigger payment of a creator’s nominal 100-token claim. The recipient receives 99, while `creatorPaid` increases by 100 and all 100 vault claims are burned. Referrer claims have the same gap. There is no recipient-delivery measurement. [Creator debit](src/TorchHook.sol:615), [referrer debit](src/TorchHook.sol:626), [payout](src/TorchHook.sol:589).
+
+The explicit promise to protect against quotes becoming fee-on-transfer remains. Enforce exact delivery or withdraw that guarantee. [Promise](docs/plan.md:226).
+
+**M2 — A stranger can substitute a pending launch’s economics at its predicted address.**
+
+Factory creation accepts unauthenticated competing intent for the same address commitment.
+
+An attacker copies a pending transaction’s salt, name, symbol and supply, substitutes their own creator address, and deploys first. The intended transaction then fails; its predicted coin address contains the attacker’s fee and allocation recipient. Other economic fields can also be substituted. Single-sided creation requires no contributed quote. [Creation](src/TorchFactory.sol:120), [address commitment](src/TorchFactory.sol:182).
+
+Bind deployment identity to authenticated creation intent and its configuration. This remains explicitly acknowledged as open in the [census](docs/site-census.md:260).
+
+**M3 — Execution still accepts losses beyond the advertised TWAP-relative band.**
+
+For a mature self-buyback pool, an ordering adversary may move spot adversely by 300 ticks. The buyback then permits another 3% movement in **square-root spot price**. With sufficient allowance and constant liquidity, a purchase reaching the upper limit receives approximately:
+
+`1 / (1.03 × 1.0001^300) = 0.94218`
+
+of TWAP-priced output before fees: a **5.78% shortfall**. [Spot admission](src/TorchHook.sol:887), [execution limit](src/TorchHook.sol:509).
+
+Three converter hops can compound allowed adverse displacements with the route tolerance to approximately `0.97 / 1.0001^900 = 0.88652` of corresponding TWAP-priced output before fees. [Hop admission](src/TorchConverter.sol:226), [route floor](src/TorchConverter.sol:184).
+
+These checks do not establish the documented 3% maximum move from the time-weighted price. Specify and test the aggregate bound, or narrow the claim. [Claim](src/TorchConstants.sol:140), [R8](docs/plan.md:427).
+
+**M4 — Corrected documents still promise behaviours the code does not deliver.**
+
+The dust qualification is adequate when the documents are read together. These material discrepancies remain:
+
+| Claim | Concrete counterexample |
+|---|---|
+| Nothing is pressable in a new pool’s first hour. | Bank a substantial bucket, leave its post-swap price unchanged, and wait 300 seconds. Oracle history and positive allowance can permit a press well before an hour. [Instruction](docs/interface.md:179), [accrual](src/TorchHook.sol:819). |
+| A thin pool “still works,” with the unspent allowance remaining available. | B4’s newly accepted granularity case returns zero coin and reverts indefinitely without bucket growth. That limitation is explicit in the plan but absent from this interface assurance. [Interface](docs/interface.md:194), [boundary](docs/plan.md:756). |
+| No trade can be refused by fee accounting. | A specified-quote trade stopped early by its price limit deliberately reverts. The refusal is accepted; the unconditional promise is wrong. [Promise](README.md:59), [refusal](src/TorchHook.sol:385). |
+| A claim never reverts once positive. | Freeze the quote after accrual; claiming reverts while preserving entitlement. The repository already contains this counterexample. [Promise](README.md:61), [witness](test/TorchIsolation.t.sol:133). |
+| The tip makes pressing worthwhile and prevents costs exceeding proceeds. | Purchased output below 400 raw coin units produces zero tip. The contract also places no bound on the caller’s gas cost. [Claim](docs/interface.md:152), [arithmetic](src/TorchHook.sol:774). |
+
+The plan’s ruling also still says failed conversion preserves a completed claim, although the entire claim-plus-conversion call reverts. Its final B4 note says `KNOWN_UNKILLED` is empty, while the script contains one entry. [Ruling](docs/plan.md:13), [atomic call](src/TorchHook.sol:674), [empty claim](docs/plan.md:876), [actual entry](tools/mutate.py:29).
+
+**M5 — Deployment and launch-sizing instructions still cause honest failures.**
+
+The deployment recipe supplies two converter constructor arguments; the implementation requires three, including the immutable hook. Following the recipe literally cannot deploy it. [Recipe](README.md:135), [constructor](src/TorchConverter.sol:112).
+
+The opening-liquidity approximation omits price. For coin as currency0 near square-root price 2, liquidity approximately equal to the allocation consumes roughly half the allocated coins, exceeding the tolerated unused remainder and reverting with `PoolTooShallow`. [Guidance](docs/interface.md:62), [refusal](src/TorchFactory.sol:145).
+
+**M6 — Quote discovery still overstates converter readiness and issuer identity.**
+
+Discovery accepts cardinality alone as “priceable.” A funded pool with two observations but only one second of history passes that predicate and fails the converter’s age requirement. Rerunning after growing a ring still inspects the historical default block unless the caller changes `--block`. [Discovery](tools/discover_quotes.py:219), [default](tools/discover_quotes.py:245), [execution refusal](src/TorchConverter.sol:221).
+
+A counterfeit token with the expected symbol and funded liquidity also satisfies discovery’s checks. These properties cannot authenticate its issuer, contrary to the README’s direction to confirm against this output. [Verification](tools/discover_quotes.py:189), [guidance](README.md:108).
+
+Label the output as candidate discovery and distinguish observation availability, current execution readiness and issuer authentication.
+
+**M7 — The census gate still accepts nonexistent source sites and irrelevant witnesses.**
+
+Replacing every census `_bank` reference with a nonexistent function in memory still returned success. The checker validates section presence and test-name existence, not source-site resolution. The missing sites and mechanisms identified above therefore remain invisible to a passing run. [Verifier](tools/check-census.py:186).
+
+Allocation-creation authorization is assigned to a test that deliberately creates no allocation. Removing the factory guard would leave that named witness unaffected. [Census assignment](docs/site-census.md:95), [test](test/TorchFactory.t.sol:262).
+
+**M8 — Critical witnesses remain non-distinguishing; the known mutation fixture is constructible.**
+
+The new small-bucket test makes 200-unit exact-input buys. Each produces a fee of `floor(200 / 101) = 1`, but its 20% self-burn share is zero. Consequently, `_bank` does **not** checkpoint allowance during the loop. Both scaled and unscaled implementations pass. [Test](test/TorchBuyback.t.sol:712), [fee](src/TorchHook.sol:285), [credit/checkpoint](src/TorchHook.sol:963).
+
+**The fixture is constructible using the existing setup:**
+
+- Keep the initial 6,000,000-unit buy: it banks 11,881 self-burn units.
+- Make each subsequent buy **505 units**, once per second for 400 seconds.
+- Each buy produces a five-unit fee and **one self-burn unit**, forcing a checkpoint.
+- Pending ends at **12,281**, remaining below the threshold where whole-unit per-second accrual becomes nonzero.
+- The source-derived model gives **201 allowance units with scaling and zero with `ALLOWANCE_SCALE = 1`**.
+
+Assert the per-iteration bucket increase and checkpoint timestamp as well as final allowance. This construction was checked arithmetically, not executed in an EVM here.
+
+Other surviving evidence defects include:
+
+- The hourly witness still uses **60-second steps**, catches failed presses, and omits intervening banking and threshold crossings. The advertised one-second schedule is not its executed schedule. [Witness](test/TorchBuyback.t.sol:588), [invocation](test/TorchBuyback.t.sol:620).
+- The shallow-pool witness passes after one successful reduction followed by permanent refusal. [Witness](test/TorchBuyback.t.sol:569).
+- The young-pool witness accepts any revert; empty allowance already satisfies it before oracle validation. [Witness](test/TorchBuyback.t.sol:365).
+- Four-branch equality compares buys only with 0.1% tolerance; the ordering witness executes no swap. [Comparison](test/TorchFeeTake.t.sol:188), [ordering](test/TorchFeeTake.t.sol:249).
+- The real-token freeze witness permits freezing to fail; the isolation fixture disconnects epoch recording and conversion. [Freeze](test/TorchEndToEnd.t.sol:320), [wiring](test/TorchIsolation.t.sol:63).
+
+These are evidence defects, not proof that every corresponding implementation is defective.
+
+**LOW**
+
+**L1 — Public oracle consultation accepts windows below its stated floor.**
+
+Once stored history is old enough, anyone can request `window = 1`; requesting zero reaches division by zero. The history-age check does not validate the effective requested window. The shipped buyback uses the fixed 600-second wrapper, limiting immediate impact. [Consultation](src/TorchOracle.sol:106), [wrapper](src/TorchOracle.sol:125).
+
+**L2 — Infrastructure failures still count as mutation kills.**
+
+After selected compiler-error strings are excluded, any nonzero exit becomes `"failed"` and is counted as caught. In-memory probes classified cache denial and process termination this way; a zero-exit “No tests found” became `"green"`. Require evidence that selected tests executed and rejected the mutant. [Classifier](tools/mutate.py:414), [reporting](tools/mutate.py:450).
+
+**Remaining acceptance/refusal conclusions**
+
+The four fee branches select the quote leg consistently; fee rounding favours the trader by fractional raw units, and split remainders go to the creator. Opening caps count positive coin receipts during the configured blocks and admit sales. They key on `tx.origin`; changing intermediary contracts does not change that origin, so the documented “contract-per-swap” explanation remains inaccurate. [Branches/caps](src/TorchHook.sol:328), [split](src/TorchHook.sol:927), [explanation](docs/plan.md:277).
+
+Factory creation, vesting allocations, venue callbacks, oracle writes and epoch recording retain their respective authorization checks. Vesting pays only its fixed recipient and retires entitlement before transfer. No additional mint, principal-withdrawal, economic setter, owner or upgrade path was found in the shipped source.
+
+For the refusal ledger, R1–R5 retain their intended core predicates; R6–R7 are withdrawn; R8 retains M3; the shipped button’s R9 fails closed. Authenticated accrual supplies R10’s deposit authority, and vesting enforces vested entitlement for R11. R12–R16 belong to the accepted cut. R17 rejects quote-requiring seeds; R18 atomically rejects specified-quote partial fills. [Ledger](docs/plan.md:420).
+
+The conversion withdrawal remains atomic at every hop: a later refusal unwinds earlier swaps and claim retirement, while direct quote claiming remains available under ordinary token semantics. I found no additional entitlement stranded behind that boundary. Self-buyback accepts partial fills and debits realised spend; zero output reverts all intermediate state. No reachable reentrancy construction changing this pool’s pending between allowance calculation and debit was established. [Per-hop refusal](src/TorchConverter.sol:262), [buyback settlement](src/TorchHook.sol:752).
+
+No platform two-press transition survives in this checkout. Its absence, the unspent platform share and the absence of v1 pot payouts are accepted scope boundaries.
+
+**EXECUTION-NOTES**
+
+- Initial and final HEAD matched the required pin. All **85 tracked review files** compared byte-for-byte equal to that commit. No files were changed.
+- Boundary checks passed. Census checking, scanning and all **94 row self-tests** passed.
+- In-memory probes confirmed the census and mutation-classifier weaknesses. All **42 mutation anchors** exist; `KNOWN_UNKILLED` has one entry.
+- Arithmetic models reproduced **18.2296%** ordinary-bucket spending under greedy one-second presses, the compounded price bounds, and the distinguishing fixed-point fixture. These were not EVM reproductions.
+- `forge test --offline` stopped before tests because the read-only workspace denied its cache write. Solidity tests, fork tests and the full mutation suite were not executed.
+
+VERDICT: HIGH=0 MEDIUM=8 LOW=2

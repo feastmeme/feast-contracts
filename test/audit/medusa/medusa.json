@@ -1,0 +1,57 @@
+{
+  "fuzzing": {
+    "workers": 6,
+    "workerResetLimit": 50,
+    "timeout": 900,
+    "testLimit": 0,
+    "shrinkLimit": 5000,
+    "callSequenceLength": 60,
+    "pruneFrequency": 5,
+    "corpusDirectory": "out/medusa-corpus",
+    "coverageEnabled": true,
+    "coverageFormats": ["lcov"],
+    "coverageExclusions": [],
+    "revertReporterEnabled": true,
+    "targetContracts": ["FeastProperties"],
+    "predeployedContracts": {},
+    "targetContractsBalances": [],
+    "constructorArgs": {},
+    "deployerAddress": "0x30000",
+    "senderAddresses": ["0x10000", "0x20000", "0x30000"],
+    "blockNumberDelayMax": 600,
+    "blockTimestampDelayMax": 7200,
+    "transactionGasLimit": 1000000000,
+    "testing": {
+      "stopOnFailedTest": true,
+      "stopOnFailedContractMatching": false,
+      "stopOnNoTests": true,
+      "testAllContracts": false,
+      "testViewMethods": false,
+      "verbosity": 1,
+      "assertionTesting": {"enabled": false},
+      "propertyTesting": {"enabled": true, "testPrefixes": ["property_"]},
+      "optimizationTesting": {"enabled": false, "testPrefixes": ["optimize_"]},
+      "targetFunctionSignatures": [
+        "FeastProperties.swap(uint256,bool,bool,uint256,uint256)",
+        "FeastProperties.burnFilled(uint256)",
+        "FeastProperties.claim(uint256,uint256)",
+        "FeastProperties.buyBack(uint256,uint256)",
+        "FeastProperties.collect(uint256)",
+        "FeastProperties.elapse(uint256)",
+        "FeastProperties.freeze(bool)"
+      ],
+      "excludeFunctionSignatures": []
+    },
+    "chainConfig": {
+      "codeSizeCheckDisabled": true,
+      "cheatCodes": {"cheatCodesEnabled": true, "enableFFI": false},
+      "skipAccountChecks": true,
+      "forkConfig": {"forkModeEnabled": false, "rpcUrl": "", "rpcBlock": 1, "poolSize": 20}
+    }
+  },
+  "compilation": {
+    "platform": "crytic-compile",
+    "platformConfig": {"target": ".", "solcVersion": "", "exportDirectory": "", "args": ["--foundry-compile-all"]}
+  },
+  "logging": {"level": "info", "logDirectory": "", "noColor": true}
+}

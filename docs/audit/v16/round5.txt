@@ -1,0 +1,89 @@
+AUDITED_TREE=163e0033b94bc45a701811df7b297991cb0631ba
+
+G1: STANDS — Post-launch settlement cannot reach `tokenCapOnly`. Empty weeks emit zero without needing a platform price. Before opening, the swap gate and buyback gate prevent outsiders from setting the canonical pool’s price; the timelocked pricer replacement remains reachable during a settlement halt. [FeastEmissions.sol:260](src/FeastEmissions.sol:260), [FeastHook.sol:394](src/FeastHook.sol:394), [FeastHook.sol:1097](src/FeastHook.sol:1097).
+
+G2: STANDS — Redirects are floored separately from each nonempty track’s share. Their sum cannot exceed the configured fraction of emitted tokens. Pots plus redirect equal emissions; payment and burn paths debit liabilities by their actual amounts. [FeastEmissions.sol:289](src/FeastEmissions.sol:289), [FeastEmissions.sol:372](src/FeastEmissions.sol:372).
+
+G3: STANDS — Genesis directly creates the window and vesting wallet, then calls the factory. The shared library reproduces the factory’s pool-key fields. I found no remaining deployment of a script contract inside a broadcast region. [Genesis.s.sol:61](script/Genesis.s.sol:61), [FeastPlatformPool.sol:14](script/FeastPlatformPool.sol:14), [FeastFactory.sol:393](src/FeastFactory.sol:393).
+
+G4: STANDS — Both single-hop directions fit across the venue’s square-root-price range. The `mul512` threshold correctly detects an overflowing composition before `mulDiv`. I found no additional reachable settlement-price overflow beyond the declared residue. [FeastPricer.sol:140](src/FeastPricer.sol:140), [FeastPricer.sol:201](src/FeastPricer.sol:201).
+
+G5: STANDS — Construction checks wrapped native and every listed quote. A codeless address, reverting call, or missing return data fails construction rather than being accepted as 18 decimals. The tests include an accepted 18-decimal control and a six-decimal trading witness with funded allowance and mature history. [FeastPricer.sol:87](src/FeastPricer.sol:87), [FeastPricer.sol:174](src/FeastPricer.sol:174), [FeastPackageTwo.t.sol:92](test/FeastPackageTwo.t.sol:92), [FeastInternalFill.t.sol:393](test/FeastInternalFill.t.sol:393).
+
+I reviewed the `4d008d1` delta, every changed contract under `src/`, all five script/helper files, the oracle and settlement dependencies, relevant tests and fixtures, boundary/census checker implementations and mutation entries, the supplied brief, specification/interface documentation, coordinator answers, plan §R–§R4, and v1 invariants/refusals in §3–§4. All reads stayed within the pinned worktree. I attempted `forge build --offline`; compilation finished, but artifact writing failed under the read-only sandbox. I did not run Solidity tests or mutations.
+
+**LOW — L1: Package-2 safety predicates lack the regression witnesses required by this round.**
+
+The guards are present in the audited code, but the existing tests do not challenge these four predicates:
+
+| Predicate | Coverage gap and consequence of removing it |
+|---|---|
+| Window callback is vault-only | [FeastLaunchWindow.sol:161](src/FeastLaunchWindow.sol:161) is exercised through legitimate settlement, never through an unauthorized callback. Removing it would let a caller inside its own vault lock invoke the window’s swap path outside `settle()`’s timing/once checks. |
+| Each committer claims once | [FeastLaunchWindow.sol:196](src/FeastLaunchWindow.sol:196) has no repeated-claim witness. The distribution test claims each account once. With two equal commitments, removing this guard allows one account’s second claim to consume the other account’s allocation. [FeastPackageTwo.t.sol:266](test/FeastPackageTwo.t.sol:266). |
+| Sink price remains positive | No sink test reaches the zero-price clamp at [FeastPlatformSink.sol:96](src/FeastPlatformSink.sol:96). The longest pre-sale decay tested is 150 hours; the initial `2^192` anchor reaches zero after 193 whole halvings without the clamp. Removing it would permit zero-cost takes. [FeastPackageTwo.t.sol:401](test/FeastPackageTwo.t.sol:401). |
+| Post-sale floor binds | The sale test checks the immediate re-anchor, without advancing until the floor binds. Removing [FeastPlatformSink.sol:95](src/FeastPlatformSink.sol:95) therefore has no corresponding assertion. |
+
+This is one coverage finding, batched across the affected package-2 mechanisms. The boundary checker classifies ABI entries; that classification does not test their caller checks. [check-boundaries.py:297](tools/check-boundaries.py:297).
+
+Add funded unauthorized-callback and repeated-claim tests, long-decay tests before and after a sale, and deletion mutations for these guards. These additions require no production-code change and introduce no new protocol violation. The anticipated mutation survivors above are established by test-path inspection, not an executed mutation run.
+
+**Deliverable endorsement**
+
+“Endorse” below means no additional blocker found within the stated rulings and boundaries. The unit’s full endorsement is withheld for L1.
+
+| # | Deliverable | Assessment |
+|---|---|---|
+| 1 | Weekly ledger | Endorse: authorization, packing, saturation and role coalescing reviewed. |
+| 2 | Opening gate | Endorse: all swap branches and the callback-skipping buyback path covered. |
+| 3 | Referral rule | Endorse: one resolver controls commission and ledger credit. |
+| 4 | Platform exit | Endorse: bound recipient, bounded payment, debit-by-paid. |
+| 5 | Genesis and supply routing | Endorse: one-shot authority, positive recipient identification, fixed split. |
+| 6 | Internal fill | Endorse within the declared domain: exact arithmetic, shared allowance, claim settlement and later burn. |
+| 7 | `Trade` | Endorse: trader deltas, filled sales and buybacks accounted for. |
+| 8 | Metadata digest | Endorse: argument stored and emitted, including explicit zero. |
+| 9 | Pricer | Endorse: route validation, history/deviation checks and overflow refusal. |
+| 10 | Emissions | Endorse: settlement ordering, caps, conservation, expiry and three levers reviewed. |
+| 11 | Genesis grants | Endorse: settled-week counting, capped unlock and horizon burn. |
+| 12 | Launch window | **Hold: L1 callback and repeated-claim witnesses.** |
+| 13 | Team vesting | Endorse: start/duration wiring, disabled renunciation and no delegation path. |
+| 14 | Platform sink | **Hold: L1 minimum-price and post-sale-floor witnesses.** |
+| 15 | Recipient interface | Endorse under the explicitly trusted genesis identity ruling. |
+| 16 | Deployment | Endorse script wiring and placeholder refusals; execution limitations below. |
+
+**P1–P20 coverage**
+
+For rows marked “supported,” inspection found an assertion that would detect the stated failure; this does not claim that I executed its mutation.
+
+| Invariant | Witness and assessment |
+|---|---|
+| P1 | [Account-sum fuzz](test/FeastFeeLedger.t.sol:221): compares each packed total with summed accounts. Supported. |
+| P2 | [Oversized fee](test/FeastFeeLedger.t.sol:212), [saturated track](test/FeastFeeLedger.t.sol:186): exercise non-reverting, symmetric skipping. Supported. |
+| P3 | [Whole-fee attribution across branches](test/FeastAttribution.t.sol:38), [burn creator exclusion](test/FeastAttribution.t.sol:117), ledger role/week tests. Supported. |
+| P4 | [Self-referral on every branch](test/FeastAttribution.t.sol:68): asserts both consequences are absent. Supported. |
+| P5 | [Stranger refusal](test/FeastGate.t.sol:40), [opening boundary](test/FeastGate.t.sol:60), [buyback gate](test/FeastGate.t.sol:138). Supported. |
+| P6 | [Literal fourteen-day bound](test/FeastGate.t.sol:164), [no ledger credit while gated](test/FeastGate.t.sol:70). Supported. |
+| P7 | [Exact sink payment](test/FeastPlatformExit.t.sol:92), [oversized bucket](test/FeastPlatformExit.t.sol:144), [reentrant payout](test/FeastPlatformExit.t.sol:185). Supported. |
+| P8 | [Genesis key loses its power](test/FeastAuthority.t.sol:75), plus genesis caller/once tests. Supported. |
+| P9 | [Supply split and custody](test/FeastGenesis.t.sol:238): includes seeded supply plus permitted burned remainder. Supported. |
+| P10 | [Spot fill and burn accounting](test/FeastInternalFill.t.sol:101), [shared hourly allowance](test/FeastInternalFill.t.sol:172), [sale-admission fuzz](test/FeastInternalFill.t.sol:479). Supported within declared boundaries. |
+| P11 | [Four-branch event comparison](test/FeastTradeEvent.t.sol:65), [filled-sale amounts](test/FeastInternalFill.t.sol:194), [buyback event](test/FeastInternalFill.t.sol:249). Supported. |
+| P12 | [Stored and announced digest](test/FeastFactory.t.sol:111), [genesis digest](test/FeastGenesis.t.sol:191). Supported. |
+| P13 | [Ordering/closure](test/FeastEmissions.t.sol:55), [budget curve](test/FeastEmissions.t.sol:70), [post-launch moved price](test/FeastEmissions.t.sol:240), [lever recovery](test/FeastEmissions.t.sol:262). Supported. |
+| P14 | [Claim conservation fuzz](test/FeastEmissions.t.sol:172), [expiry burn](test/FeastEmissions.t.sol:470), [final remainder](test/FeastEmissions.t.sol:495). Supported. |
+| P15 | [Callee bands](test/FeastEmissions.t.sol:346), [next-week application](test/FeastEmissions.t.sol:365), [actual-emission redirect](test/FeastEmissions.t.sol:412), pricer replacement test. Supported. |
+| P16 | [Unlock and count-once](test/FeastPackageTwo.t.sol:167), [grant cap](test/FeastPackageTwo.t.sol:184), [horizon burn](test/FeastPackageTwo.t.sol:201). Supported. |
+| P17 | [Uniform distribution](test/FeastPackageTwo.t.sol:266) and [full refund](test/FeastPackageTwo.t.sol:316) cover normal settlement and lapse. **Incomplete for L1.** Full-input consumption is enforced by the hook’s partial-fill refusal. |
+| P18 | [Linear vesting](test/FeastPackageTwo.t.sol:348), [renunciation and voting](test/FeastPackageTwo.t.sol:362). Supported. |
+| P19 | [Halving](test/FeastPackageTwo.t.sol:386), [payment burn/re-anchor](test/FeastPackageTwo.t.sol:401), asset exclusion tests. **Incomplete for L1 floors.** |
+| P20 | [Package-1 authority sweep](test/FeastAuthority.t.sol:80), [timelock-only levers](test/FeastEmissions.t.sol:322), surface classification. **Incomplete for L1 window callback.** |
+
+**EXECUTION-NOTES — uncounted**
+
+- `forge build --offline`: Solc finished; Foundry then failed writing an artifact with `Operation not permitted`. Build completion, Solidity tests and mutation kills were not independently reproduced.
+- In-memory integer checks passed: 13,376 redirect cases covering every empty-track mask and both weight tables; venue price endpoints plus 10,000 samples for single-hop/composition bounds; the sink’s decay multiplication bound under the fixed FEAST supply.
+- I read the operator’s reported 306 in-process and 23 fork passes, checker passes, round-4 mutation results, and deployment rehearsal. These remain operator-reported evidence.
+- No additional production-code defect or extension of a declared residue was established. HEAD remained pinned and the working tree remained clean.
+
+scheme-entity findings this round: no — the finding concerns missing regression witnesses, not an established defect in the original scheme design.
+
+VERDICT: HIGH=0 MEDIUM=0 LOW=1
